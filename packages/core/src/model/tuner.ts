@@ -79,6 +79,7 @@ export function computeTune(x: BuildParams): TuneResult {
   const ducted = x.frame === "ducted";
   const why: string[] = [];
   const warnings: string[] = [];
+  if (x.prop !== d) warnings.push(`Проп ${x.prop}" поза підтримуваним діапазоном ${PROP_MIN}–${PROP_MAX}": розрахунок зроблено для ${d}", перевіряйте значення особливо обережно.`);
 
   const sizeMul = interp([[5, 1], [7, 0.86], [8, 0.81], [10, 0.74], [13, 0.66], [15, 0.62], [18, 0.58], [21, 0.55], [24, 0.52]], d);
   const powerRatio = (x.kv * x.cells) / typicalKvCells(d);
