@@ -17,6 +17,9 @@ import {
   LogParseError,
   analyzeLog,
   compareLogs,
+  applyCliValues,
+  cliValuesFromLogHeaders,
+  type CliValues,
   type LogAnalysis,
   synthBbl,
   type FlightLog,
@@ -46,6 +49,9 @@ let analysis: LogAnalysis | null = null;
 let analysisName = "";
 /** Попередній лог для порівняння «до/після» */
 let previous: { a: LogAnalysis; name: string } | null = null;
+/** Реальні налаштування борта: з заголовка логу або зчитані з польотника */
+let startTune: Tune | null = null;
+let actual: { values: CliValues; source: "лог" | "польотник" } | null = null;
 let adjustment: Adjustment | null = null;
 let mode: "base" | "log" = "log";
 let currentCli = "";
@@ -101,10 +107,19 @@ function render() {
     /* сховище недоступне: нічого страшного */
   }
   const base = computeTune(x);
-  adjustment = analysis ? adjustFromLog(base, analysis) : null;
+  // Корекцію за логом рахуємо від того, що реально стоїть на борту, якщо це відомо.
+  const real = actual ? applyCliValues(base, actual.values) : null;
+  const start: Tune = real && real.applied.length >= 3 ? real.tune : base;
+  startTune = start;
+  adjustment = analysis ? adjustFromLog(start, analysis) : null;
+  if (adjustment && start !== base) {
+    adjustment.findings.unshift(
+      `Корекція рахується від налаштувань, ${actual!.source === "лог" ? "з якими записано лог" : "зчитаних з польотника"} (${real!.applied.length} параметрів), а не від стартового тюну.`,
+    );
+  }
   const showLog = !!adjustment && mode === "log";
   const tune: Tune = showLog ? adjustment!.tune : base;
-  const ref: Tune = showLog ? base : { pid: BF_DEFAULTS, filters: base.filters, extras: base.extras, rates: base.rates };
+  const ref: Tune = showLog ? start : { pid: BF_DEFAULTS, filters: base.filters, extras: base.extras, rates: base.rates };
 
   $("summary").innerHTML = [
     stat(base.metrics.master.toFixed(2), "Майстер-множник"),
@@ -127,8 +142,8 @@ function render() {
         return `<dt>${k}</dt><dd class="${changed ? "changed" : ""}">${v}</dd>`;
       })
       .join("");
-  $("filters").innerHTML = kv(tune.filters, base.filters);
-  $("extras").innerHTML = kv(tune.extras, base.extras);
+  $("filters").innerHTML = kv(tune.filters, ref.filters);
+  $("extras").innerHTML = kv(tune.extras, ref.extras);
   $("why").innerHTML = base.why.map((t) => `<li>${t}</li>`).join("");
   $("rateWhy").innerHTML = base.rateWhy.map((t) => `<li>${t}</li>`).join("");
   renderRates(tune, ref, showLog);
@@ -143,7 +158,7 @@ function render() {
   $("cli").textContent = currentCli;
   $("fcDiffWrap").hidden = true;
 
-  if (analysis && adjustment) renderAnalysis(analysis, adjustment, base);
+  if (analysis && adjustment) renderAnalysis(analysis, adjustment, start);
 }
 
 function renderRates(tune: Tune, ref: Tune, showLog: boolean) {
@@ -267,6 +282,8 @@ async function loadLog(getBytes: () => Promise<Uint8Array>, name: string) {
   try {
     const { log, note } = parseLogBytes(await getBytes());
     const fresh = analyzeLog(log);
+    const fromLog = cliValuesFromLogHeaders(log.meta);
+    if (actual?.source !== "польотник") actual = Object.keys(fromLog).length >= 3 ? { values: fromLog, source: "лог" } : null;
     if (analysis) previous = { a: analysis, name: analysisName };
     analysis = fresh;
     analysisName = name;
@@ -304,7 +321,7 @@ $("cmpReset").addEventListener("click", () => {
   previous = null;
   render();
 });
-$("specAxis").addEventListener("change", () => analysis && renderSpectrum(analysis, computeTune(readParams())));
+$("specAxis").addEventListener("change", () => analysis && renderSpectrum(analysis, startTune ?? computeTune(readParams())));
 $<HTMLInputElement>("logFile").addEventListener("change", (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (file) void loadLog(async () => new Uint8Array(await file.arrayBuffer()), file.name);
@@ -392,6 +409,10 @@ $("fcRead").addEventListener("click", async () => {
   try {
     fcStatus("Зчитую налаштування з польотника…");
     const diff = await fc.readCurrent(currentCli);
+    const values: CliValues = {};
+    for (const d of diff) if (d.current !== null) values[d.name] = d.current;
+    actual = { values, source: "польотник" };
+    render();
     const changed = diff.filter((d) => d.current !== d.value);
     const scope = (d: (typeof diff)[number]) => (d.scope === "global" ? "" : `${d.scope === "profile" ? "PID" : "rate"} ${d.index + 1}`);
     $("fcDiff").innerHTML = diff

@@ -238,6 +238,27 @@ function header(w: Writer) {
   h("vbatref", String(VBATREF));
   h("motorOutput", `${MINMOTOR},2047`);
   h("looptime", "125");
+  // Налаштування, з якими «літав» борт (як їх пише Betaflight)
+  h("rollPID", "41,76,33");
+  h("pitchPID", "44,80,36");
+  h("yawPID", "38,76,0");
+  h("d_min", "26,28,0");
+  h("ff_weight", "90,95,80");
+  h("rates_type", "3");
+  h("rc_rates", "18,18,16");
+  h("rates", "50,50,40");
+  h("rc_expo", "20,20,10");
+  h("thr_mid", "38");
+  h("thr_expo", "0");
+  h("gyro_lpf1_dyn_hz", "180,360");
+  h("gyro_lpf2_static_hz", "360");
+  h("dterm_lpf1_dyn_hz", "60,110");
+  h("dterm_lpf2_static_hz", "110");
+  h("dyn_notch_count", "1");
+  h("dyn_notch_q", "300");
+  h("dyn_notch_min_hz", "60");
+  h("dyn_notch_max_hz", "400");
+  h("dshot_bidir", "1");
 }
 
 export interface SynthBblOptions extends SynthOptions {
