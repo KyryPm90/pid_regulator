@@ -1,0 +1,17 @@
+{
+  "name": "@pid/web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@pid/core": "*"
+  },
+  "devDependencies": {
+    "vite": "6.3.5"
+  }
+}

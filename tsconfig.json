@@ -10,7 +10,8 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "types": ["vite/client"]
+    "allowImportingTsExtensions": false,
+    "types": ["vite/client", "node"]
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["packages/*/src", "packages/*/tests", "apps/*/src", "apps/*/tests", "vitest.config.ts", "apps/web/vite.config.ts"]
 }

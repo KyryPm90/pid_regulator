@@ -13,6 +13,20 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pid
+          POSTGRES_PASSWORD: pid
+          POSTGRES_DB: pid_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pid"
+          --health-interval 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://pid:pid@localhost:5432/pid_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,7 +39,7 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         if: github.ref == 'refs/heads/main'
         with:
-          path: dist
+          path: apps/web/dist
 
   deploy:
     if: github.ref == 'refs/heads/main'
