@@ -1,0 +1,138 @@
+import type { Axis } from "../model/types";
+import { AXES } from "../model/types";
+import type { FlightLog } from "./csv";
+import { bandRms, findPeaks, welch, type Peak, type Spectrum } from "./spectrum";
+import { estimateStepResponse, type StepResponse } from "./step";
+
+export interface AxisAnalysis {
+  step: StepResponse | null;
+  /** Спектр нефільтрованого гіроскопа (або відфільтрованого, якщо gyroUnfilt не записано) */
+  spectrumRaw: Spectrum | null;
+  /** Спектр відфільтрованого гіроскопа (те, що бачить PID-контролер) */
+  spectrumFiltered: Spectrum | null;
+  /** Найсильніші піки шуму до фільтрів */
+  rawPeaks: Peak[];
+  /** Залишковий шум після фільтрів, RMS °/с у смузі 100 Гц і вище */
+  filteredHfRms: number;
+  /** Залишковий шум після фільтрів у смузі 20–100 Гц (пропвош, резонанси рами) */
+  filteredLowRms: number;
+}
+
+export interface ThrottleBand {
+  label: string;
+  lo: number;
+  hi: number;
+  peaks: Peak[];
+}
+
+export interface LogAnalysis {
+  sampleRate: number;
+  duration: number;
+  hasUnfiltered: boolean;
+  hasSetpoint: boolean;
+  axes: Record<Axis, AxisAnalysis>;
+  throttleBands: ThrottleBand[];
+  /** Частота, що лишається на місці при різному газі (резонанс рами), Гц */
+  frameResonanceHz: number | null;
+  /** Чи росте частота головного піку разом із газом (шум моторів) */
+  motorNoiseTracksThrottle: boolean | null;
+  /** Частка часу, коли хоч один мотор на максимумі */
+  motorSaturation: number | null;
+  notes: string[];
+}
+
+const BANDS: Array<[string, number, number]> = [
+  ["низький газ", 0, 0.35],
+  ["середній газ", 0.35, 0.55],
+  ["високий газ", 0.55, 1.01],
+];
+
+export function analyzeLog(log: FlightLog): LogAnalysis {
+  const fs = log.sampleRate;
+  const nyq = fs / 2;
+  const notes: string[] = [];
+  if (fs < 1000) notes.push(`Частота запису ${Math.round(fs)} Гц замала для аналізу шуму. Поставте blackbox rate хоча б 1–2 кГц.`);
+  if (!log.gyroUnfilt) notes.push("У лозі немає gyroUnfilt, тому шум до фільтрів оцінено за відфільтрованим гіроскопом. Увімкніть запис gyroUnfilt у Blackbox.");
+  if (!log.setpoint) notes.push("У лозі немає setpoint, тому відгук на крок не розраховано.");
+  if (log.duration < 20) notes.push("Лог коротший за 20 секунд. Для надійної оцінки потрібна хвилина польоту з різкими маневрами.");
+
+  const axes = {} as Record<Axis, AxisAnalysis>;
+  for (const ax of AXES) {
+    const raw = (log.gyroUnfilt ?? log.gyro)[ax];
+    const spectrumRaw = welch(raw, fs, 4);
+    const spectrumFiltered = welch(log.gyro[ax], fs, 4);
+    axes[ax] = {
+      step: log.setpoint ? estimateStepResponse(log.setpoint[ax], log.gyro[ax], fs) : null,
+      spectrumRaw,
+      spectrumFiltered,
+      rawPeaks: spectrumRaw ? findPeaks(spectrumRaw, 60, nyq * 0.95, 4) : [],
+      filteredHfRms: spectrumFiltered ? bandRms(spectrumFiltered, 100, nyq) : 0,
+      filteredLowRms: spectrumFiltered ? bandRms(spectrumFiltered, 20, 100) : 0,
+    };
+    if (log.setpoint && !axes[ax].step) notes.push(`На осі ${ax} замало різких рухів стіків для оцінки відгуку.`);
+  }
+
+  // Піки при різному газі: шум моторів рухається, резонанс рами стоїть на місці.
+  const throttleBands: ThrottleBand[] = [];
+  if (log.throttle) {
+    const thr = log.throttle;
+    for (const [label, lo, hi] of BANDS) {
+      const mask = (a: number, b: number) => {
+        let s = 0;
+        for (let i = a; i < b; i += 16) s += thr[i]!;
+        const m = s / Math.ceil((b - a) / 16);
+        return m >= lo && m < hi;
+      };
+      const raw = log.gyroUnfilt ?? log.gyro;
+      const sr = welch(raw.roll, fs, 4, mask);
+      const sp = welch(raw.pitch, fs, 4, mask);
+      if (!sr || !sp) continue;
+      const combined: Spectrum = { freqs: sr.freqs, amp: sr.amp.map((v, k) => Math.hypot(v, sp.amp[k]!)) };
+      throttleBands.push({ label, lo, hi, peaks: findPeaks(combined, 60, nyq * 0.95, 6) });
+    }
+  }
+
+  let frameResonanceHz: number | null = null;
+  let motorNoiseTracksThrottle: boolean | null = null;
+  if (throttleBands.length >= 2) {
+    const all = throttleBands.flatMap((b) => b.peaks.map((p) => ({ ...p, band: b.label })));
+    for (const p of all) {
+      const bandsWith = new Set(all.filter((q) => Math.abs(q.hz - p.hz) <= 8).map((q) => q.band));
+      if (bandsWith.size >= 2 && (frameResonanceHz === null || p.hz < frameResonanceHz)) frameResonanceHz = Math.round(p.hz);
+    }
+    const tops = throttleBands
+      .map((b) => b.peaks.find((p) => frameResonanceHz === null || Math.abs(p.hz - frameResonanceHz) > 8))
+      .filter((p): p is Peak => !!p)
+      .map((p) => p.hz);
+    if (tops.length >= 2) motorNoiseTracksThrottle = tops[tops.length - 1]! > tops[0]! * 1.25;
+  }
+
+  let motorSaturation: number | null = null;
+  if (log.motors.length) {
+    const fromMeta = Number((log.meta["motorOutput"] ?? "").split(",")[1]);
+    let maxSeen = 0;
+    for (const m of log.motors) for (let i = 0; i < m.length; i++) maxSeen = Math.max(maxSeen, m[i]!);
+    const high = fromMeta > 0 ? fromMeta : maxSeen > 1000 ? 2047 : 2000;
+    let sat = 0;
+    for (let i = 0; i < log.length; i++) {
+      if (log.motors.some((m) => m[i]! >= high - 5)) sat++;
+    }
+    motorSaturation = sat / log.length;
+    if (motorSaturation > 0.02) {
+      notes.push(`Мотори впираються в максимум ${(motorSaturation * 100).toFixed(1)}% часу. У ці моменти PID не має запасу, і відгук на крок буде гіршим, ніж показано.`);
+    }
+  }
+
+  return {
+    sampleRate: fs,
+    duration: log.duration,
+    hasUnfiltered: !!log.gyroUnfilt,
+    hasSetpoint: !!log.setpoint,
+    axes,
+    throttleBands,
+    frameResonanceHz,
+    motorNoiseTracksThrottle,
+    motorSaturation,
+    notes,
+  };
+}

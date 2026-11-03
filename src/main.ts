@@ -1,0 +1,259 @@
+import "./style.css";
+import type { Axis, BuildParams, Tune } from "./model/types";
+import { AXES } from "./model/types";
+import { BF_DEFAULTS, computeTune } from "./model/tuner";
+import { buildCli } from "./model/cli";
+import { adjustFromLog, type Adjustment } from "./model/adjust";
+import { parseBlackboxCsv, LogParseError } from "./blackbox/csv";
+import { analyzeLog, type LogAnalysis } from "./blackbox/analyze";
+import { drawChart } from "./ui/chart";
+import { synthLogCsv } from "./sim/synthLog";
+
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+
+const PRESETS: Record<string, Partial<BuildParams>> = {
+  whoop: { prop: 2.5, pitch: 2, blades: 4, frame: "ducted", stator: "1404", kv: 4600, cells: 4, auw: 240, style: "cinematic", motorPoles: 12, rpmFilter: true },
+  three: { prop: 3.5, pitch: 2.5, blades: 3, frame: "open", stator: "1804", kv: 2800, cells: 6, auw: 330, style: "freestyle", motorPoles: 12, rpmFilter: true },
+  five: { prop: 5, pitch: 4.3, blades: 3, frame: "open", stator: "2207", kv: 1950, cells: 6, auw: 680, style: "freestyle", motorPoles: 14, rpmFilter: true },
+  race: { prop: 5.1, pitch: 4.8, blades: 3, frame: "open", stator: "2306", kv: 2050, cells: 6, auw: 560, style: "race", motorPoles: 14, rpmFilter: true },
+  seven: { prop: 7, pitch: 4, blades: 2, frame: "open", stator: "2807", kv: 1300, cells: 6, auw: 1050, style: "longrange", motorPoles: 14, rpmFilter: true },
+  ten: { prop: 10, pitch: 5, blades: 3, frame: "open", stator: "3115", kv: 900, cells: 6, auw: 2600, style: "cinematic", motorPoles: 14, rpmFilter: true },
+};
+
+const STORE_KEY = "fpv-pid-tuner:build";
+const AXIS_NAME: Record<Axis, string> = { roll: "Roll", pitch: "Pitch", yaw: "Yaw" };
+const AXIS_COLOR: Record<Axis, string> = { roll: "--s-roll", pitch: "--s-pitch", yaw: "--s-yaw" };
+const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+let analysis: LogAnalysis | null = null;
+let adjustment: Adjustment | null = null;
+let mode: "base" | "log" = "log";
+
+function readParams(): BuildParams {
+  const num = (id: string, fallback: number) => {
+    const v = Number($<HTMLInputElement>(id).value);
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  };
+  return {
+    prop: num("prop", 5),
+    pitch: num("pitch", 4),
+    blades: Number($<HTMLSelectElement>("blades").value) as 2 | 3 | 4,
+    frame: $<HTMLSelectElement>("frame").value as BuildParams["frame"],
+    stator: $<HTMLInputElement>("stator").value,
+    kv: num("kv", 1950),
+    cells: num("cells", 6),
+    auw: num("auw", 600),
+    style: $<HTMLSelectElement>("style").value as BuildParams["style"],
+    motorPoles: num("motorPoles", 14),
+    profile: Number($<HTMLSelectElement>("profile").value) || 0,
+    rpmFilter: $<HTMLInputElement>("rpmFilter").checked,
+  };
+}
+
+function applyParams(p: Partial<BuildParams>) {
+  for (const [k, v] of Object.entries(p)) {
+    const el = document.getElementById(k) as HTMLInputElement | null;
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = Boolean(v);
+    else el.value = String(v);
+  }
+}
+
+function delta(v: number, b: number): string {
+  if (!b) return "";
+  const p = Math.round((v / b - 1) * 100);
+  if (Math.abs(p) < 2) return "";
+  return `<span class="d ${p > 0 ? "up" : "down"}">${p > 0 ? "+" : ""}${p}%</span>`;
+}
+
+function stat(value: string, label: string, cls = "") {
+  return `<div class="stat ${cls}"><b>${value}</b><span>${label}</span></div>`;
+}
+
+function render() {
+  const x = readParams();
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(x));
+  } catch {
+    /* сховище недоступне: нічого страшного */
+  }
+  const base = computeTune(x);
+  adjustment = analysis ? adjustFromLog(base, analysis) : null;
+  const showLog = !!adjustment && mode === "log";
+  const tune: Tune = showLog ? adjustment!.tune : base;
+  const ref: Tune = showLog ? base : { pid: BF_DEFAULTS, filters: base.filters, extras: base.extras };
+
+  $("summary").innerHTML = [
+    stat(base.metrics.master.toFixed(2), "Майстер-множник"),
+    stat(`${Math.round(base.metrics.powerRatio * 100)}%`, "Потужність від типової"),
+    stat(`${Math.round(base.metrics.weightRatio * 100)}%`, "Вага від типової"),
+    stat(`${Math.round(base.metrics.motorHzHover)} Гц`, "Шум моторів на висінні"),
+  ].join("");
+
+  $("pidBody").innerHTML = AXES.map((ax) => {
+    const p = tune.pid[ax];
+    const b = ref.pid[ax];
+    return `<tr><td>${AXIS_NAME[ax]}</td><td>${p.p}${delta(p.p, b.p)}</td><td>${p.i}${delta(p.i, b.i)}</td><td>${p.d}${delta(p.d, b.d)}</td><td>${p.dMin}</td><td>${p.f}${delta(p.f, b.f)}</td></tr>`;
+  }).join("");
+
+  const kv = (o: object, refObj: object) =>
+    Object.entries(o)
+      .filter(([, v]) => v !== null)
+      .map(([k, v]) => {
+        const changed = showLog && (refObj as Record<string, unknown>)[k] !== v;
+        return `<dt>${k}</dt><dd class="${changed ? "changed" : ""}">${v}</dd>`;
+      })
+      .join("");
+  $("filters").innerHTML = kv(tune.filters, base.filters);
+  $("extras").innerHTML = kv(tune.extras, base.extras);
+  $("why").innerHTML = base.why.map((t) => `<li>${t}</li>`).join("");
+  $("warns").innerHTML = base.warnings.map((t) => `<li>${t}</li>`).join("");
+  $("warnBox").hidden = !base.warnings.length;
+
+  $("modeSeg").hidden = !adjustment;
+  $("modeSeg").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  $("cliTitle").textContent = showLog ? "CLI для Betaflight: після корекції за логом" : "CLI для Betaflight: стартовий тюн";
+  $("cli").textContent = buildCli(x, tune, showLog ? `Скориговано за Blackbox-логом (${adjustment!.changes.length} змін)` : undefined);
+
+  if (analysis && adjustment) renderAnalysis(analysis, adjustment, base);
+}
+
+function renderAnalysis(a: LogAnalysis, adj: Adjustment, base: Tune) {
+  $("bbResult").hidden = false;
+  const worst = Math.max(a.axes.roll.step?.peak ?? 0, a.axes.pitch.step?.peak ?? 0);
+  const noise = Math.max(a.axes.roll.filteredHfRms, a.axes.pitch.filteredHfRms);
+  $("bbSummary").innerHTML = [
+    stat(`${(a.sampleRate / 1000).toFixed(a.sampleRate % 1000 ? 2 : 0)} кГц`, `Запис, ${Math.round(a.duration)} с`),
+    stat(worst ? worst.toFixed(2) : "немає", "Пік відгуку roll/pitch", worst > 1.12 || (worst && worst < 0.97) ? "bad" : worst ? "good" : ""),
+    stat(`${noise.toFixed(2)}`, "Шум після фільтрів, °/с", noise > 2.5 ? "bad" : noise < 0.6 ? "good" : ""),
+    stat(a.frameResonanceHz ? `${a.frameResonanceHz} Гц` : "немає", "Резонанс рами", a.frameResonanceHz ? "bad" : "good"),
+  ].join("");
+
+  // Відгук на крок
+  const stepSeries = AXES.flatMap((ax) => {
+    const s = a.axes[ax].step;
+    return s ? [{ x: s.t, y: s.y, color: css(AXIS_COLOR[ax]), label: AXIS_NAME[ax] }] : [];
+  });
+  drawChart($<HTMLCanvasElement>("stepChart"), stepSeries, {
+    xMin: 0, xMax: 300, yMin: 0, yMax: 1.6, xLabel: "мс", yLabel: "відгук",
+    xTicks: [0, 50, 100, 150, 200, 250, 300], yTicks: [0, 0.5, 1, 1.5],
+    markers: [{ y: 1, label: "", color: css("--muted") }],
+  });
+  $("stepLegend").innerHTML = AXES.map((ax) => {
+    const s = a.axes[ax].step;
+    return `<span><i style="background:var(${AXIS_COLOR[ax]})"></i>${AXIS_NAME[ax]}: ${s ? `пік ${s.peak.toFixed(2)}, 50% за ${s.delayMs.toFixed(0)} мс` : "мало даних"}</span>`;
+  }).join("");
+
+  renderSpectrum(a, base);
+
+  $("changesBody").innerHTML = adj.changes.length
+    ? adj.changes.map((c) => `<tr><td>${c.param}</td><td>${c.from}</td><td>${c.to}${c.group === "PID" ? delta(c.to, c.from) : ""}</td><td>${c.reason}</td></tr>`).join("")
+    : `<tr><td colspan="4">Змін немає</td></tr>`;
+  $("findings").innerHTML = [...a.notes, ...adj.findings].map((t) => `<li>${t}</li>`).join("");
+}
+
+function renderSpectrum(a: LogAnalysis, base: Tune) {
+  const ax = $<HTMLSelectElement>("specAxis").value as Axis;
+  const raw = a.axes[ax].spectrumRaw;
+  const filt = a.axes[ax].spectrumFiltered;
+  const db = (s: { amp: Float64Array }) => Array.from(s.amp, (v) => 20 * Math.log10(v + 1e-3));
+  const xMax = Math.min(1000, Math.floor(a.sampleRate / 2 / 100) * 100);
+  const series = [];
+  if (raw && a.hasUnfiltered) series.push({ x: raw.freqs, y: db(raw), color: css("--s-raw"), label: "до фільтрів", width: 1.2 });
+  if (filt) series.push({ x: filt.freqs, y: db(filt), color: css("--s-filt"), label: "після фільтрів" });
+  const markers = [{ x: base.filters.gyro_lpf1_dyn_min_hz, label: "LPF1 min", color: css("--muted") }];
+  if (a.frameResonanceHz) markers.push({ x: a.frameResonanceHz, label: "рама", color: css("--amber") });
+  drawChart($<HTMLCanvasElement>("specChart"), series, {
+    xMin: 0, xMax, yMin: -40, yMax: 20, xLabel: "Гц", yLabel: "дБ (°/с)",
+    xTicks: Array.from({ length: Math.floor(xMax / 200) + 1 }, (_, i) => i * 200), yTicks: [-40, -20, 0, 20],
+    markers,
+  });
+  $("specLegend").innerHTML = series.map((s) => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join("");
+}
+
+function setStatus(text: string, error = false) {
+  const el = $("bbStatus");
+  el.textContent = text;
+  el.classList.toggle("error", error);
+}
+
+async function loadLog(getText: () => Promise<string>, name: string) {
+  setStatus(`Аналізую ${name}…`);
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    const text = await getText();
+    const log = parseBlackboxCsv(text);
+    analysis = analyzeLog(log);
+    mode = "log";
+    render();
+    const n = adjustment?.changes.length ?? 0;
+    setStatus(`${name}: ${Math.round(log.duration)} с польоту. ${n ? `Запропоновано ${n} змін, CLI нижче вже їх містить.` : "Змін не потрібно."}`);
+  } catch (e) {
+    analysis = null;
+    $("bbResult").hidden = true;
+    render();
+    setStatus(e instanceof LogParseError ? e.message : `Не вдалося обробити файл: ${(e as Error).message}`, true);
+  }
+}
+
+// Події
+document.querySelectorAll<HTMLButtonElement>(".presets button").forEach((b) =>
+  b.addEventListener("click", () => {
+    applyParams(PRESETS[b.dataset.p!]!);
+    render();
+  }),
+);
+const form = $<HTMLFormElement>("f");
+form.addEventListener("input", render);
+form.addEventListener("change", render);
+form.addEventListener("submit", (e) => e.preventDefault());
+$("modeSeg").querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
+  b.addEventListener("click", () => {
+    mode = b.dataset.mode as "base" | "log";
+    render();
+  }),
+);
+$("specAxis").addEventListener("change", () => analysis && renderSpectrum(analysis, computeTune(readParams())));
+$<HTMLInputElement>("logFile").addEventListener("change", (e) => {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (file) void loadLog(() => file.text(), file.name);
+});
+$("demoLog").addEventListener("click", () => {
+  void loadLog(async () => synthLogCsv({ seconds: 30 }), "приклад логу (синтетичний 5\")");
+});
+$("copy").addEventListener("click", () => {
+  const btn = $("copy");
+  const text = $("cli").textContent ?? "";
+  const done = () => {
+    btn.textContent = "Скопійовано";
+    setTimeout(() => (btn.textContent = "Скопіювати"), 1600);
+  };
+  const fallback = () => {
+    const range = document.createRange();
+    range.selectNodeContents($("cli"));
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    btn.textContent = "Виділено, натисніть Ctrl+C";
+    setTimeout(() => (btn.textContent = "Скопіювати"), 2500);
+  };
+  try {
+    navigator.clipboard.writeText(text).then(done, fallback);
+  } catch {
+    fallback();
+  }
+});
+let resizeTimer = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => analysis && render(), 150);
+});
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => analysis && render());
+
+try {
+  const saved = localStorage.getItem(STORE_KEY);
+  if (saved) applyParams(JSON.parse(saved) as Partial<BuildParams>);
+} catch {
+  /* ігноруємо */
+}
+render();
