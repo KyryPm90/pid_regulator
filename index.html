@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FPV PID Тюнер</title>
+<meta name="description" content="Стартові PID і фільтри Betaflight за параметрами FPV-борта та корекція за Blackbox-логом">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>FPV PID Тюнер</h1>
+      <p class="sub">Для великих бортів 8–21". Крок 1: введіть параметри борта й отримайте стартові PID, фільтри та CLI для Betaflight. Крок 2: після польоту завантажте Blackbox-лог, і тюнер підкоригує налаштування за реальним шумом і відгуком.</p>
+    </div>
+    <span class="fw">Betaflight 4.4–4.5</span>
+  </header>
+
+  <div class="grid">
+    <form class="panel" id="f" autocomplete="off">
+      <h2>Паспорт борта</h2>
+      <div class="presets" aria-label="Шаблони">
+        <button type="button" data-p="p8">8"</button>
+        <button type="button" data-p="p10">10"</button>
+        <button type="button" data-p="p13">13"</button>
+        <button type="button" data-p="p15">15"</button>
+        <button type="button" data-p="p21">21"</button>
+      </div>
+      <div class="fields">
+        <div class="field"><label for="prop">Діаметр пропа, дюйми</label><input id="prop" type="number" step="0.5" min="7" max="24" value="10"></div>
+        <div class="field"><label for="pitch">Крок пропа, дюйми</label><input id="pitch" type="number" step="0.1" min="2" max="12" value="5"></div>
+        <div class="field"><label for="blades">Лопатей</label><select id="blades"><option value="2">2</option><option value="3" selected>3</option><option value="4">4+</option></select></div>
+        <div class="field"><label for="frame">Тип рами</label><select id="frame"><option value="open" selected>Відкрита</option><option value="ducted">З дактами</option></select></div>
+        <div class="field"><label for="stator">Статор мотора</label><input id="stator" type="text" value="3115" placeholder="напр. 3115"></div>
+        <div class="field"><label for="kv">KV мотора</label><input id="kv" type="number" step="10" min="50" max="3000" value="900"></div>
+        <div class="field"><label for="cells">Акумулятор, S</label><select id="cells"><option>4</option><option>5</option><option selected>6</option><option>8</option><option>10</option><option>12</option><option>14</option></select></div>
+        <div class="field"><label for="auw">Злітна вага, г</label><input id="auw" type="number" step="50" min="300" max="40000" value="2600"></div>
+        <div class="field"><label for="style">Стиль польоту</label><select id="style"><option value="longrange" selected>Лонг-рейндж</option><option value="cinematic">Кіно / вантаж, плавний</option><option value="freestyle">Агресивний</option><option value="race">Швидкий, максимальний відгук</option></select></div>
+        <div class="field"><label for="motorPoles">Полюсів мотора</label><input id="motorPoles" type="number" step="2" min="8" max="56" value="14"></div>
+        <div class="field"><label for="profile">PID профіль</label><select id="profile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
+        <div class="field"><label for="rateProfile">Rate профіль</label><select id="rateProfile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
+        <label class="check" for="rpmFilter"><input id="rpmFilter" type="checkbox" checked><span>Bidirectional DShot + RPM-фільтр<small>Потрібна прошивка ESC з телеметрією (BLHeli_32, Bluejay, AM32)</small></span></label>
+      </div>
+    </form>
+
+    <div class="results">
+      <div class="summary" id="summary"></div>
+
+      <section class="panel">
+        <div class="head-row">
+          <h2>PID і Feedforward</h2>
+          <div class="seg" id="modeSeg" hidden>
+            <button type="button" data-mode="base">Стартові</button>
+            <button type="button" data-mode="log" aria-pressed="true">Після логу</button>
+          </div>
+        </div>
+        <div class="tbl"><table>
+          <thead><tr><th>Вісь</th><th>P</th><th>I</th><th>D</th><th>D min</th><th>FF</th></tr></thead>
+          <tbody id="pidBody"></tbody>
+        </table></div>
+      </section>
+
+      <div class="two">
+        <section class="panel"><h2>Фільтри</h2><dl class="kv" id="filters"></dl></section>
+        <section class="panel"><h2>Динаміка і мотори</h2><dl class="kv" id="extras"></dl></section>
+      </div>
+
+      <section class="panel">
+        <h2>Рейти і газ</h2>
+        <div class="rates">
+          <div class="tbl"><table>
+            <thead><tr><th>Вісь</th><th>Центр, °/с</th><th>Макс, °/с</th><th>Експо</th></tr></thead>
+            <tbody id="ratesBody"></tbody>
+          </table>
+          <dl class="kv thr" id="thrKv"></dl></div>
+          <div><canvas id="rateChart" class="chart small"></canvas><div class="legend" id="rateLegend"></div></div>
+        </div>
+      </section>
+
+      <section class="warn" id="warnBox" hidden><h2>На що звернути увагу</h2><ul class="notes" id="warns"></ul></section>
+
+      <details class="panel" id="whyBox"><summary><h2>Чому такі стартові значення</h2></summary><ul class="notes" id="why"></ul><h3 class="why-h">Рейти</h3><ul class="notes" id="rateWhy"></ul></details>
+    </div>
+  </div>
+
+  <section class="bb panel" id="bb">
+    <div class="bb-head">
+      <div>
+        <h2>Корекція за Blackbox</h2>
+        <p class="hint">Налаштуйте Blackbox на 1–2 кГц, увімкніть запис gyroUnfilt, політайте 1–2 хвилини з різкими нахилами по крену й тангажу, поворотами та змінами газу. Відкрийте лог у Blackbox Explorer і експортуйте CSV, потім завантажте його сюди. Тюнер автоматично підбере фільтри (LPF, RPM, режекторний) і рейти (газ висіння, максимальні швидкості) за логом. Файл обробляється тільки у вашому браузері.</p>
+      </div>
+      <div class="bb-actions">
+        <label class="file-btn" for="logFile">Завантажити CSV<input id="logFile" type="file" accept=".csv,text/csv"></label>
+        <button type="button" class="ghost" id="demoLog">Спробувати на прикладі</button>
+      </div>
+    </div>
+    <p class="status" id="bbStatus" role="status"></p>
+
+    <div id="bbResult" hidden>
+      <div class="summary" id="bbSummary"></div>
+      <div class="two">
+        <section class="sub-panel">
+          <h3>Відгук на крок</h3>
+          <canvas id="stepChart" class="chart"></canvas>
+          <div class="legend" id="stepLegend"></div>
+        </section>
+        <section class="sub-panel">
+          <div class="head-row">
+            <h3>Спектр шуму гіроскопа</h3>
+            <select id="specAxis" aria-label="Вісь спектра"><option value="roll">Roll</option><option value="pitch">Pitch</option><option value="yaw">Yaw</option></select>
+          </div>
+          <canvas id="specChart" class="chart"></canvas>
+          <div class="legend" id="specLegend"></div>
+        </section>
+      </div>
+      <section class="sub-panel">
+        <h3>Що змінено</h3>
+        <div class="tbl"><table class="changes">
+          <thead><tr><th>Параметр</th><th>Було</th><th>Стало</th><th>Причина</th></tr></thead>
+          <tbody id="changesBody"></tbody>
+        </table></div>
+      </section>
+      <section class="sub-panel"><h3>Висновки</h3><ul class="notes" id="findings"></ul></section>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="cli-head"><h2 id="cliTitle">CLI для Betaflight</h2><button type="button" class="copy" id="copy">Скопіювати</button></div>
+    <pre id="cli" tabindex="0"></pre>
+  </section>
+
+  <p class="foot">Модель евристична: стартові значення виводяться з дефолтів Betaflight і масштабуються за розміром пропа, потужністю (KV × банки), вагою та статором. Корекція за логом змінює параметри не більше ніж на 15% за раз, тож тюн робиться кількома ітераціями «політ → лог → корекція». Перед першим зльотом перевірте напрямок моторів без пропелерів, першим злетом зробіть 30 секунд висіння на малій висоті й перевірте нагрів моторів. Якщо мотори гарячі, зменшіть D на 15–20%.</p>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

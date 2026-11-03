@@ -1,0 +1,19 @@
+{
+  "name": "fpv-pid-tuner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Підбір стартових PID і фільтрів Betaflight за параметрами FPV-борта та корекція за Blackbox-логом",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vitest": "3.2.4"
+  }
+}
