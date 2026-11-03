@@ -42,7 +42,9 @@ jobs:
           path: apps/web/dist
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    # Деплой на GitHub Pages вмикається змінною репозиторію PAGES_ENABLED=true
+    # (Pages для приватних репозиторіїв доступний лише на платних планах).
+    if: github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true'
     needs: test
     runs-on: ubuntu-latest
     environment:
