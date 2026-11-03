@@ -13,3 +13,4 @@ export * from "./blackbox/compare";
 export * from "./sim/synthLog";
 export * from "./sim/synthBbl";
 export * from "./model/cliParse";
+export * from "./model/settings";
