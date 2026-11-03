@@ -23,6 +23,8 @@ export interface BuildParams {
   motorPoles: number;
   /** Індекс PID-профілю Betaflight, 0..3 */
   profile: number;
+  /** Індекс rate-профілю Betaflight, 0..3 */
+  rateProfile: number;
   /** Bidirectional DShot + RPM-фільтр */
   rpmFilter: boolean;
 }
@@ -66,15 +68,40 @@ export interface ExtraSettings {
   feedforward_boost: number;
 }
 
+/** Actual rates для однієї осі, °/с і частка експо. */
+export interface AxisRate {
+  /** Чутливість у центрі стіка, °/с */
+  center: number;
+  /** Максимальна швидкість обертання, °/с */
+  max: number;
+  /** Експо 0..1 */
+  expo: number;
+}
+
+export interface RateSettings {
+  roll: AxisRate;
+  pitch: AxisRate;
+  yaw: AxisRate;
+  /** Середня точка кривої газу (0..1), зазвичай газ висіння */
+  thrMid: number;
+  /** Експо газу 0..1 */
+  thrExpo: number;
+  /** Обмеження газу (SCALE), %, 100 = без обмеження */
+  throttleLimit: number;
+}
+
 export interface Tune {
   pid: PidSet;
   filters: FilterSettings;
   extras: ExtraSettings;
+  rates: RateSettings;
 }
 
 export interface TuneResult extends Tune {
   /** Пояснення, чому вибрано такі значення */
   why: string[];
+  /** Пояснення до rate-профілю */
+  rateWhy: string[];
   /** Попередження для пілота */
   warnings: string[];
   metrics: {

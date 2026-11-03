@@ -9,7 +9,7 @@ import type { BuildParams } from "../src/model/types";
 
 const TEN: BuildParams = {
   prop: 10, pitch: 5, blades: 3, frame: "open", stator: "3115", kv: 900, cells: 6, auw: 2600,
-  style: "longrange", motorPoles: 14, profile: 0, rpmFilter: true,
+  style: "longrange", motorPoles: 14, profile: 0, rateProfile: 0, rpmFilter: true,
 };
 const PRESETS: Record<number, BuildParams> = {
   8: { ...TEN, prop: 8, pitch: 4.5, stator: "2812", kv: 1000, auw: 1600 },

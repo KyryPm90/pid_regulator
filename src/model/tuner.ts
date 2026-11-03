@@ -1,5 +1,6 @@
 import type { Axis, AxisPid, BuildParams, ExtraSettings, FilterSettings, FlyingStyle, TuneResult } from "./types";
 import { AXES } from "./types";
+import { computeRates } from "./rates";
 
 /** Дефолтні PID Betaflight 4.4–4.5 (профіль за замовчуванням). */
 export const BF_DEFAULTS: Record<Axis, AxisPid> = {
@@ -184,5 +185,6 @@ export function computeTune(x: BuildParams): TuneResult {
   if (motorHzHover < 60) warnings.push(`Шум моторів на висінні ≈ ${Math.round(motorHzHover)} Гц, нижче межі динамічного режекторного фільтра Betaflight (60 Гц). Покладайтеся на RPM-фільтр.`);
   if (x.cells >= 12) warnings.push("Перевірте, що FC, ESC і BEC розраховані на напругу 12S.");
 
-  return { pid, filters, extras, why, warnings, metrics: { master, powerRatio, weightRatio, motorHzMax, motorHzHover } };
+  const { rates, why: rateWhy } = computeRates(x, powerRatio, weightRatio);
+  return { pid, filters, extras, rates, why, rateWhy, warnings, metrics: { master, powerRatio, weightRatio, motorHzMax, motorHzHover } };
 }

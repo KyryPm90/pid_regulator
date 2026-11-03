@@ -4,6 +4,7 @@ import { AXES } from "./model/types";
 import { BF_DEFAULTS, computeTune } from "./model/tuner";
 import { buildCli } from "./model/cli";
 import { adjustFromLog, type Adjustment } from "./model/adjust";
+import { actualRate } from "./model/rates";
 import { parseBlackboxCsv, LogParseError } from "./blackbox/csv";
 import { analyzeLog, type LogAnalysis } from "./blackbox/analyze";
 import { drawChart } from "./ui/chart";
@@ -47,6 +48,7 @@ function readParams(): BuildParams {
     style: $<HTMLSelectElement>("style").value as BuildParams["style"],
     motorPoles: num("motorPoles", 14),
     profile: Number($<HTMLSelectElement>("profile").value) || 0,
+    rateProfile: Number($<HTMLSelectElement>("rateProfile").value) || 0,
     rpmFilter: $<HTMLInputElement>("rpmFilter").checked,
   };
 }
@@ -82,7 +84,7 @@ function render() {
   adjustment = analysis ? adjustFromLog(base, analysis) : null;
   const showLog = !!adjustment && mode === "log";
   const tune: Tune = showLog ? adjustment!.tune : base;
-  const ref: Tune = showLog ? base : { pid: BF_DEFAULTS, filters: base.filters, extras: base.extras };
+  const ref: Tune = showLog ? base : { pid: BF_DEFAULTS, filters: base.filters, extras: base.extras, rates: base.rates };
 
   $("summary").innerHTML = [
     stat(base.metrics.master.toFixed(2), "Майстер-множник"),
@@ -108,6 +110,8 @@ function render() {
   $("filters").innerHTML = kv(tune.filters, base.filters);
   $("extras").innerHTML = kv(tune.extras, base.extras);
   $("why").innerHTML = base.why.map((t) => `<li>${t}</li>`).join("");
+  $("rateWhy").innerHTML = base.rateWhy.map((t) => `<li>${t}</li>`).join("");
+  renderRates(tune, ref, showLog);
   $("warns").innerHTML = base.warnings.map((t) => `<li>${t}</li>`).join("");
   $("warnBox").hidden = !base.warnings.length;
 
@@ -117,6 +121,28 @@ function render() {
   $("cli").textContent = buildCli(x, tune, showLog ? `Скориговано за Blackbox-логом (${adjustment!.changes.length} змін)` : undefined);
 
   if (analysis && adjustment) renderAnalysis(analysis, adjustment, base);
+}
+
+function renderRates(tune: Tune, ref: Tune, showLog: boolean) {
+  const r = tune.rates;
+  const mark = (v: number, b: number) => (showLog && v !== b ? ` class="changed"` : "");
+  $("ratesBody").innerHTML = AXES.map((ax) => {
+    const a = r[ax], b = ref.rates[ax];
+    return `<tr><td>${AXIS_NAME[ax]}</td><td${mark(a.center, b.center)}>${a.center}</td><td${mark(a.max, b.max)}>${a.max}</td><td>${a.expo.toFixed(2)}</td></tr>`;
+  }).join("");
+  const thr: Array<[string, string, boolean]> = [
+    ["thr_mid", `${Math.round(r.thrMid * 100)}%`, r.thrMid !== ref.rates.thrMid],
+    ["thr_expo", `${Math.round(r.thrExpo * 100)}%`, false],
+    ["throttle_limit", r.throttleLimit < 100 ? `${r.throttleLimit}%` : "без обмеження", false],
+  ];
+  $("thrKv").innerHTML = thr.map(([k, v, ch]) => `<dt>${k}</dt><dd class="${showLog && ch ? "changed" : ""}">${v}</dd>`).join("");
+  const xs = Array.from({ length: 101 }, (_, i) => i / 100);
+  const top = Math.max(r.roll.max, r.pitch.max, r.yaw.max);
+  const yMax = Math.ceil(top / 100) * 100;
+  drawChart($<HTMLCanvasElement>("rateChart"),
+    (["roll", "yaw"] as const).map((ax) => ({ x: xs.map((v) => v * 100), y: xs.map((v) => actualRate(r[ax], v)), color: css(AXIS_COLOR[ax]), label: ax })),
+    { xMin: 0, xMax: 100, yMin: 0, yMax, xLabel: "стік, %", yLabel: "°/с", xTicks: [0, 25, 50, 75, 100], yTicks: Array.from({ length: yMax / 100 + 1 }, (_, i) => i * 100).filter((_, i, arr) => arr.length <= 8 || i % 2 === 0) });
+  $("rateLegend").innerHTML = `<span><i style="background:var(--s-roll)"></i>Roll / Pitch</span><span><i style="background:var(--s-yaw)"></i>Yaw</span>`;
 }
 
 function renderAnalysis(a: LogAnalysis, adj: Adjustment, base: Tune) {
@@ -148,7 +174,7 @@ function renderAnalysis(a: LogAnalysis, adj: Adjustment, base: Tune) {
   renderSpectrum(a, base);
 
   $("changesBody").innerHTML = adj.changes.length
-    ? adj.changes.map((c) => `<tr><td>${c.param}</td><td>${c.from}</td><td>${c.to}${c.group === "PID" ? delta(c.to, c.from) : ""}</td><td>${c.reason}</td></tr>`).join("")
+    ? adj.changes.map((c) => `<tr><td>${c.param}<span class="d">${c.group}</span></td><td>${c.from}</td><td>${c.to}${c.group === "PID" ? delta(c.to, c.from) : ""}</td><td>${c.reason}</td></tr>`).join("")
     : `<tr><td colspan="4">Змін немає</td></tr>`;
   $("findings").innerHTML = [...a.notes, ...adj.findings].map((t) => `<li>${t}</li>`).join("");
 }
@@ -247,9 +273,9 @@ $("copy").addEventListener("click", () => {
 let resizeTimer = 0;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = window.setTimeout(() => analysis && render(), 150);
+  resizeTimer = window.setTimeout(render, 150);
 });
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => analysis && render());
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 
 try {
   const saved = localStorage.getItem(STORE_KEY);

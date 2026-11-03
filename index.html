@@ -39,7 +39,8 @@
         <div class="field"><label for="auw">Злітна вага, г</label><input id="auw" type="number" step="50" min="300" max="40000" value="2600"></div>
         <div class="field"><label for="style">Стиль польоту</label><select id="style"><option value="longrange" selected>Лонг-рейндж</option><option value="cinematic">Кіно / вантаж, плавний</option><option value="freestyle">Агресивний</option><option value="race">Швидкий, максимальний відгук</option></select></div>
         <div class="field"><label for="motorPoles">Полюсів мотора</label><input id="motorPoles" type="number" step="2" min="8" max="56" value="14"></div>
-        <div class="field"><label for="profile">PID профіль</label><select id="profile"><option value="0">1 (profile 0)</option><option value="1">2 (profile 1)</option><option value="2">3 (profile 2)</option><option value="3">4 (profile 3)</option></select></div>
+        <div class="field"><label for="profile">PID профіль</label><select id="profile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
+        <div class="field"><label for="rateProfile">Rate профіль</label><select id="rateProfile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
         <label class="check" for="rpmFilter"><input id="rpmFilter" type="checkbox" checked><span>Bidirectional DShot + RPM-фільтр<small>Потрібна прошивка ESC з телеметрією (BLHeli_32, Bluejay, AM32)</small></span></label>
       </div>
     </form>
@@ -66,9 +67,21 @@
         <section class="panel"><h2>Динаміка і мотори</h2><dl class="kv" id="extras"></dl></section>
       </div>
 
+      <section class="panel">
+        <h2>Рейти і газ</h2>
+        <div class="rates">
+          <div class="tbl"><table>
+            <thead><tr><th>Вісь</th><th>Центр, °/с</th><th>Макс, °/с</th><th>Експо</th></tr></thead>
+            <tbody id="ratesBody"></tbody>
+          </table>
+          <dl class="kv thr" id="thrKv"></dl></div>
+          <div><canvas id="rateChart" class="chart small"></canvas><div class="legend" id="rateLegend"></div></div>
+        </div>
+      </section>
+
       <section class="warn" id="warnBox" hidden><h2>На що звернути увагу</h2><ul class="notes" id="warns"></ul></section>
 
-      <details class="panel" id="whyBox"><summary><h2>Чому такі стартові значення</h2></summary><ul class="notes" id="why"></ul></details>
+      <details class="panel" id="whyBox"><summary><h2>Чому такі стартові значення</h2></summary><ul class="notes" id="why"></ul><h3 class="why-h">Рейти</h3><ul class="notes" id="rateWhy"></ul></details>
     </div>
   </div>
 
@@ -76,7 +89,7 @@
     <div class="bb-head">
       <div>
         <h2>Корекція за Blackbox</h2>
-        <p class="hint">Налаштуйте Blackbox на 1–2 кГц, увімкніть запис gyroUnfilt, політайте 1–2 хвилини з різкими нахилами по крену й тангажу, поворотами та змінами газу. Відкрийте лог у Blackbox Explorer і експортуйте CSV, потім завантажте його сюди. Файл обробляється тільки у вашому браузері.</p>
+        <p class="hint">Налаштуйте Blackbox на 1–2 кГц, увімкніть запис gyroUnfilt, політайте 1–2 хвилини з різкими нахилами по крену й тангажу, поворотами та змінами газу. Відкрийте лог у Blackbox Explorer і експортуйте CSV, потім завантажте його сюди. Тюнер автоматично підбере фільтри (LPF, RPM, режекторний) і рейти (газ висіння, максимальні швидкості) за логом. Файл обробляється тільки у вашому браузері.</p>
       </div>
       <div class="bb-actions">
         <label class="file-btn" for="logFile">Завантажити CSV<input id="logFile" type="file" accept=".csv,text/csv"></label>

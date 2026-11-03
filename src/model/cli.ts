@@ -5,7 +5,7 @@ import { STYLES } from "./tuner";
 /**
  * Формує CLI-скрипт для Betaflight 4.4–4.5.
  * Глобальні змінні (мотори, фільтри гіроскопа) йдуть до `profile N`,
- * змінні PID-профілю (PID, D-term фільтри, FF, TPA) після.
+ * змінні PID-профілю (PID, D-term фільтри, FF, TPA) після, rate-профіль окремо в кінці.
  */
 export function buildCli(x: BuildParams, t: Tune, note?: string): string {
   const L: string[] = [];
@@ -61,6 +61,20 @@ export function buildCli(x: BuildParams, t: Tune, note?: string): string {
   set("tpa_breakpoint", e.tpa_breakpoint);
   set("thrust_linear", e.thrust_linear);
   set("dyn_idle_min_rpm", e.dyn_idle_min_rpm);
+  L.push("");
+  L.push(`# rate-профіль ${x.rateProfile + 1} (Actual rates)`);
+  L.push(`rateprofile ${x.rateProfile}`);
+  const r = t.rates;
+  set("rates_type", "ACTUAL");
+  for (const ax of AXES) {
+    set(`${ax}_rc_rate`, Math.round(r[ax].center / 10));
+    set(`${ax}_srate`, Math.round(r[ax].max / 10));
+    set(`${ax}_expo`, Math.round(r[ax].expo * 100));
+  }
+  set("thr_mid", Math.round(r.thrMid * 100));
+  set("thr_expo", Math.round(r.thrExpo * 100));
+  set("throttle_limit_type", r.throttleLimit < 100 ? "SCALE" : "OFF");
+  set("throttle_limit_percent", r.throttleLimit);
   L.push("");
   L.push("save");
   return L.join("\n");

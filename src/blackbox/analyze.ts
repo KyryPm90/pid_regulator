@@ -23,6 +23,10 @@ export interface ThrottleBand {
   lo: number;
   hi: number;
   peaks: Peak[];
+  /** Спектр roll+pitch у цьому діапазоні газу */
+  spectrum: Spectrum;
+  /** Основна частота шуму моторів у діапазоні, Гц */
+  motorHz: number | null;
 }
 
 export interface LogAnalysis {
@@ -38,6 +42,14 @@ export interface LogAnalysis {
   motorNoiseTracksThrottle: boolean | null;
   /** Частка часу, коли хоч один мотор на максимумі */
   motorSaturation: number | null;
+  /** Діапазон основної частоти моторів у польоті, Гц */
+  motorHzRange: { min: number; max: number } | null;
+  /** Скільки гармонік моторів помітно в спектрі (1–3) */
+  motorHarmonics: number | null;
+  /** Газ висіння (0..1): медіана газу, коли стіки крену й тангажу майже в центрі */
+  hoverThrottle: number | null;
+  /** 99-й перцентиль заданої швидкості обертання, °/с: скільки з рейтів реально використано */
+  setpointP99: Record<Axis, number> | null;
   notes: string[];
 }
 
@@ -88,7 +100,7 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
       const sp = welch(raw.pitch, fs, 4, mask);
       if (!sr || !sp) continue;
       const combined: Spectrum = { freqs: sr.freqs, amp: sr.amp.map((v, k) => Math.hypot(v, sp.amp[k]!)) };
-      throttleBands.push({ label, lo, hi, peaks: findPeaks(combined, 30, nyq * 0.95, 6) });
+      throttleBands.push({ label, lo, hi, spectrum: combined, peaks: findPeaks(combined, 30, nyq * 0.95, 6), motorHz: null });
     }
   }
 
@@ -107,11 +119,56 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
         frameResonanceHz = Math.round(same.reduce((s, q) => s + q.hz, 0) / same.length);
       }
     }
-    const tops = throttleBands
-      .map((b) => b.peaks.find((p) => frameResonanceHz === null || Math.abs(p.hz - frameResonanceHz) > 6))
-      .filter((p): p is Peak => !!p)
-      .map((p) => p.hz);
+    for (const b of throttleBands) {
+      // Основна частота моторів: найнижчий сильний пік (≥ 40% найсильнішого), що не є резонансом рами.
+      const cand = b.peaks.filter((p) => frameResonanceHz === null || Math.abs(p.hz - frameResonanceHz) > 6);
+      const top = Math.max(0, ...cand.map((p) => p.amp));
+      const strong = cand.filter((p) => p.amp >= top * 0.4).sort((x, y) => x.hz - y.hz);
+      b.motorHz = strong[0] ? Math.round(strong[0].hz) : null;
+    }
+    const tops = throttleBands.map((b) => b.motorHz).filter((v): v is number => v !== null);
     if (tops.length >= 2) motorNoiseTracksThrottle = tops[tops.length - 1]! > tops[0]! * 1.25;
+  }
+  const motorTops = throttleBands.map((b) => b.motorHz).filter((v): v is number => v !== null);
+  const motorHzRange = motorNoiseTracksThrottle && motorTops.length ? { min: Math.min(...motorTops), max: Math.max(...motorTops) } : null;
+
+  // Гармоніки: порівнюємо амплітуду на 2f і 3f з основною в діапазоні високого газу.
+  let motorHarmonics: number | null = null;
+  const hiBand = [...throttleBands].reverse().find((b) => b.motorHz);
+  if (motorHzRange && hiBand?.motorHz) {
+    const ampAt = (hz: number) => {
+      const s = hiBand.spectrum;
+      let best = 0;
+      for (let k = 0; k < s.freqs.length; k++) if (Math.abs(s.freqs[k]! - hz) <= Math.max(6, hz * 0.04)) best = Math.max(best, s.amp[k]!);
+      return best;
+    };
+    const f0 = ampAt(hiBand.motorHz);
+    const f2 = hiBand.motorHz * 2 < nyq ? ampAt(hiBand.motorHz * 2) : 0;
+    const f3 = hiBand.motorHz * 3 < nyq ? ampAt(hiBand.motorHz * 3) : 0;
+    motorHarmonics = f3 > f0 * 0.15 ? 3 : f2 > f0 * 0.15 ? 2 : 1;
+  }
+
+  let hoverThrottle: number | null = null;
+  if (log.throttle) {
+    const calm: number[] = [];
+    for (let i = 0; i < log.length; i += 4) {
+      const sp = log.setpoint;
+      const still = sp ? Math.abs(sp.roll[i]!) < 30 && Math.abs(sp.pitch[i]!) < 30 : Math.abs(log.gyro.roll[i]!) < 30 && Math.abs(log.gyro.pitch[i]!) < 30;
+      if (still && log.throttle[i]! > 0.08) calm.push(log.throttle[i]!);
+    }
+    if (calm.length > 200) {
+      calm.sort((a, b) => a - b);
+      hoverThrottle = calm[Math.floor(calm.length / 2)]!;
+    }
+  }
+
+  let setpointP99: Record<Axis, number> | null = null;
+  if (log.setpoint) {
+    setpointP99 = {} as Record<Axis, number>;
+    for (const ax of AXES) {
+      const v = Array.from(log.setpoint[ax], Math.abs).sort((a, b) => a - b);
+      setpointP99[ax] = v[Math.floor(v.length * 0.99)] ?? 0;
+    }
   }
 
   let motorSaturation: number | null = null;
@@ -140,6 +197,10 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
     frameResonanceHz,
     motorNoiseTracksThrottle,
     motorSaturation,
+    motorHzRange,
+    motorHarmonics,
+    hoverThrottle,
+    setpointP99,
     notes,
   };
 }
