@@ -17,7 +17,7 @@ export interface Adjustment {
   findings: string[];
 }
 
-/** Пороги залишкового шуму після фільтрів (RMS, °/с, 100 Гц і вище). */
+/** Пороги залишкового шуму після фільтрів (RMS, °/с, 80 Гц і вище). */
 export const NOISE_CLEAN = 0.6;
 export const NOISE_DIRTY = 2.5;
 
@@ -86,12 +86,12 @@ export function adjustFromLog(base: Tune, a: LogAnalysis): Adjustment {
     changes.push({ group: "Фільтри", param: key, from, to, reason });
   };
   const scaleLpf = (k: number, reason: string) => {
-    setF("gyro_lpf1_dyn_min_hz", round5(clamp(f.gyro_lpf1_dyn_min_hz * k, 100, 600)), reason);
-    setF("gyro_lpf1_dyn_max_hz", round5(clamp(f.gyro_lpf1_dyn_max_hz * k, 200, 1000)), reason);
-    setF("gyro_lpf2_static_hz", round5(clamp(f.gyro_lpf2_static_hz * k, 200, 1000)), reason);
-    setF("dterm_lpf1_dyn_min_hz", round5(clamp(f.dterm_lpf1_dyn_min_hz * k, 40, 200)), reason);
-    setF("dterm_lpf1_dyn_max_hz", round5(clamp(f.dterm_lpf1_dyn_max_hz * k, 80, 300)), reason);
-    setF("dterm_lpf2_static_hz", round5(clamp(f.dterm_lpf2_static_hz * k, 80, 300)), reason);
+    setF("gyro_lpf1_dyn_min_hz", round5(clamp(f.gyro_lpf1_dyn_min_hz * k, 60, 600)), reason);
+    setF("gyro_lpf1_dyn_max_hz", round5(clamp(f.gyro_lpf1_dyn_max_hz * k, 120, 1000)), reason);
+    setF("gyro_lpf2_static_hz", round5(clamp(f.gyro_lpf2_static_hz * k, 120, 1000)), reason);
+    setF("dterm_lpf1_dyn_min_hz", round5(clamp(f.dterm_lpf1_dyn_min_hz * k, 30, 200)), reason);
+    setF("dterm_lpf1_dyn_max_hz", round5(clamp(f.dterm_lpf1_dyn_max_hz * k, 50, 300)), reason);
+    setF("dterm_lpf2_static_hz", round5(clamp(f.dterm_lpf2_static_hz * k, 50, 300)), reason);
   };
   const noiseTxt = `залишковий шум ${hfNoise.toFixed(2)} °/с`;
   if (hfNoise < NOISE_CLEAN) scaleLpf(1.15, `Після фільтрів чисто (${noiseTxt}): менше фільтрації дає меншу затримку`);
@@ -106,7 +106,7 @@ export function adjustFromLog(base: Tune, a: LogAnalysis): Adjustment {
   }
   const topRaw = Math.max(...(["roll", "pitch"] as const).flatMap((ax) => a.axes[ax].rawPeaks.map((p) => p.hz)), 0);
   if (topRaw > f.dyn_notch_max_hz && topRaw < a.sampleRate / 2 * 0.9) {
-    setF("dyn_notch_max_hz", clamp(round10(topRaw * 1.1), 350, 1000), `Пік шуму на ${Math.round(topRaw)} Гц вище межі режекторного фільтра`);
+    setF("dyn_notch_max_hz", clamp(round10(topRaw * 1.1), 200, 1000), `Пік шуму на ${Math.round(topRaw)} Гц вище межі режекторного фільтра`);
   }
   if (a.motorNoiseTracksThrottle === true) findings.push("Головний пік шуму росте з газом, тобто це шум моторів. Якщо RPM-фільтр увімкнено, а пік видно і після фільтрів, перевірте motor_poles.");
 

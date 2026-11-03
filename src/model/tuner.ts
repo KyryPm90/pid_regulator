@@ -21,9 +21,9 @@ interface StyleProfile {
 }
 
 export const STYLES: Record<FlyingStyle, StyleProfile> = {
-  freestyle: { name: "фрістайл", p: 1, i: 1, ff: 1, relax: 15, smooth: 25, jitter: 7, boost: 15, antiGravity: 80 },
-  race: { name: "рейсинг", p: 1.05, i: 1.05, ff: 1.3, relax: 30, smooth: 15, jitter: 5, boost: 20, antiGravity: 100 },
-  cinematic: { name: "кіно", p: 0.95, i: 1.05, ff: 0.55, relax: 10, smooth: 50, jitter: 12, boost: 5, antiGravity: 90 },
+  freestyle: { name: "агресивний", p: 1, i: 1, ff: 1, relax: 15, smooth: 25, jitter: 7, boost: 15, antiGravity: 80 },
+  race: { name: "швидкий", p: 1.05, i: 1.05, ff: 1.3, relax: 30, smooth: 15, jitter: 5, boost: 20, antiGravity: 100 },
+  cinematic: { name: "плавний", p: 0.95, i: 1.05, ff: 0.55, relax: 10, smooth: 50, jitter: 12, boost: 5, antiGravity: 90 },
   longrange: { name: "лонг-рейндж", p: 0.95, i: 1.1, ff: 0.75, relax: 10, smooth: 40, jitter: 10, boost: 10, antiGravity: 100 },
 };
 
@@ -55,24 +55,31 @@ export function statorVolume(stator: string): number | null {
   return w * w * h;
 }
 
-/** Типовий KV × S для пропа заданого діаметра (5" ≈ 1950KV × 6S). */
-export const typicalKvCells = (prop: number): number => 11700 * Math.pow(5 / prop, 0.85);
-/** Типова злітна вага для пропа заданого діаметра, г. */
-export const typicalWeight = (prop: number, ducted: boolean): number => 650 * Math.pow(prop / 5, 1.8) * (ducted ? 1.35 : 1);
-/** Типовий об'єм статора для пропа заданого діаметра. */
-export const typicalStatorVolume = (prop: number): number => 3388 * Math.pow(prop / 5, 1.6);
+/** Мінімальний і максимальний діаметр пропа, який підтримує модель, дюйми. */
+export const PROP_MIN = 7;
+export const PROP_MAX = 24;
+
+/** Типовий KV × S для пропа (8" ≈ 1000KV × 6S, 15" ≈ 400KV × 12S, 21" ≈ 170KV × 12S). */
+export const typicalKvCells = (prop: number): number =>
+  interp([[5, 11700], [7, 7800], [8, 6000], [10, 5400], [13, 5200], [15, 4800], [18, 3400], [21, 2100], [24, 1700]], prop);
+/** Типова злітна вага для пропа, г. */
+export const typicalWeight = (prop: number, ducted: boolean): number =>
+  interp([[5, 650], [7, 1050], [8, 1600], [10, 2600], [13, 5000], [15, 7000], [18, 11000], [21, 16000], [24, 22000]], prop) * (ducted ? 1.35 : 1);
+/** Типовий об'єм статора (ширина² × висота) для пропа: 2810 на 8", 3115 на 10", 4214 на 13", 6215 на 21". */
+export const typicalStatorVolume = (prop: number): number =>
+  interp([[5, 3388], [7, 4700], [8, 8000], [10, 14000], [13, 24000], [15, 27000], [18, 40000], [21, 58000], [24, 75000]], prop);
 
 /** Основна частота обертання мотора на повному газі під навантаженням, Гц. */
 export const motorHzAtFullThrottle = (kv: number, cells: number): number => (kv * cells * 4.2 * 0.78) / 60;
 
 export function computeTune(x: BuildParams): TuneResult {
-  const d = clamp(x.prop, 1.5, 13);
+  const d = clamp(x.prop, PROP_MIN, PROP_MAX);
   const st = STYLES[x.style];
   const ducted = x.frame === "ducted";
   const why: string[] = [];
   const warnings: string[] = [];
 
-  const sizeMul = interp([[2, 1.35], [3, 1.2], [4, 1.07], [5, 1], [6, 0.93], [7, 0.86], [8, 0.81], [10, 0.74], [13, 0.66]], d);
+  const sizeMul = interp([[5, 1], [7, 0.86], [8, 0.81], [10, 0.74], [13, 0.66], [15, 0.62], [18, 0.58], [21, 0.55], [24, 0.52]], d);
   const powerRatio = (x.kv * x.cells) / typicalKvCells(d);
   const weightRatio = x.auw / typicalWeight(d, ducted);
   const vol = statorVolume(x.stator);
@@ -85,7 +92,7 @@ export function computeTune(x: BuildParams): TuneResult {
   const loadP = clamp(1 - (pitchRatio - 0.8) * 0.12, 0.94, 1.04);
   const bladeP = x.blades === 2 ? 1.04 : x.blades === 4 ? 0.97 : 1;
   const bladeD = x.blades === 2 ? 0.96 : x.blades === 4 ? 1.05 : 1;
-  const dRatio = interp([[2, 0.95], [3, 0.96], [5, 1], [7, 1.1], [10, 1.15]], d);
+  const dRatio = interp([[5, 1], [7, 1.1], [10, 1.15], [13, 1.18], [15, 1.2], [21, 1.25]], d);
   const ductD = ducted ? 1.12 : 1;
   const ductP = ducted ? 1.05 : 1;
 
@@ -99,7 +106,7 @@ export function computeTune(x: BuildParams): TuneResult {
     const b = BF_DEFAULTS[ax];
     const D = Math.round(clamp(b.d * dMul, 0, 250));
     pid[ax] = {
-      p: Math.round(clamp(b.p * pMul * (ax === "yaw" && d >= 7 ? 0.92 : 1), 5, 250)),
+      p: Math.round(clamp(b.p * pMul * (ax === "yaw" ? interp([[7, 0.92], [13, 0.88], [21, 0.85]], d) : 1), 5, 250)),
       i: Math.round(clamp(b.i * iMul, 5, 250)),
       d: D,
       dMin: ax === "yaw" ? 0 : Math.round(D * (b.dMin / b.d)),
@@ -109,7 +116,7 @@ export function computeTune(x: BuildParams): TuneResult {
 
   const motorHzMax = motorHzAtFullThrottle(x.kv, x.cells);
   const motorHzHover = motorHzMax * 0.42;
-  const filt = clamp(interp([[2, 1.2], [3, 1.15], [5, 1], [7, 0.85], [10, 0.7], [13, 0.6]], d) * (x.rpmFilter ? 1.1 : 0.9), 0.55, 1.4);
+  const filt = clamp(interp([[5, 1], [7, 0.85], [10, 0.7], [13, 0.6], [15, 0.55], [21, 0.45], [24, 0.42]], d) * (x.rpmFilter ? 1.1 : 0.9), 0.35, 1.4);
 
   const filters: FilterSettings = {
     gyro_lpf1_dyn_min_hz: round5(250 * filt),
@@ -121,18 +128,18 @@ export function computeTune(x: BuildParams): TuneResult {
     dyn_notch_count: x.rpmFilter ? 1 : 3,
     dyn_notch_q: x.rpmFilter ? 500 : 300,
     dyn_notch_min_hz: clamp(round10(motorHzHover * 0.55), 60, 250),
-    dyn_notch_max_hz: clamp(round10(motorHzMax * 1.05), 350, 1000),
+    dyn_notch_max_hz: clamp(round10(motorHzMax * 1.05), 200, 1000),
   };
 
   const extras: ExtraSettings = {
     dshot_bidir: x.rpmFilter ? "ON" : "OFF",
     motor_poles: x.motorPoles,
     rpm_filter_harmonics: x.rpmFilter ? 3 : null,
-    rpm_filter_min_hz: x.rpmFilter ? clamp(round10(motorHzMax * 0.16), 50, 200) : null,
-    dyn_idle_min_rpm: x.rpmFilter ? clamp(Math.round(30 * (5 / d)), 15, 80) : 0,
+    rpm_filter_min_hz: x.rpmFilter ? clamp(round10(motorHzMax * 0.16), 30, 200) : null,
+    dyn_idle_min_rpm: x.rpmFilter ? clamp(Math.round(30 * (5 / d)), 6, 40) : 0,
     tpa_rate: clamp(Math.round(65 + (powerRatio - 1) * 40), 50, 80),
     tpa_breakpoint: powerRatio > 1.15 ? 1250 : powerRatio < 0.9 ? 1450 : 1350,
-    thrust_linear: ducted || d <= 3 ? 25 : 0,
+    thrust_linear: ducted ? 25 : 0,
     anti_gravity_gain: st.antiGravity,
     iterm_relax_cutoff: st.relax,
     feedforward_smooth_factor: st.smooth,
@@ -156,7 +163,7 @@ export function computeTune(x: BuildParams): TuneResult {
         (torqueRatio > 1.1 ? "більший крутний момент дає запас керованості." : torqueRatio < 0.9 ? "момент менший, мотору важче розкручувати проп." : "момент відповідає пропу."),
     );
   }
-  if (d >= 7) why.push(`На великих пропах D відносно P вищий (×${dRatio.toFixed(2)}), бо їм потрібне сильніше гасіння пропвошу, а yaw P знижено на 8%.`);
+  why.push(`На пропах ${d}" D відносно P вищий (×${dRatio.toFixed(2)}): велика інерція пропа потребує сильнішого гасіння, а yaw P знижено, бо yaw на великих бортах керується повільно.`);
   if (ducted) why.push("Дакти додають опору й турбулентності, тому D +12%, P +5% і thrust_linear = 25.");
   if (x.blades === 2) why.push("Двохлопатеві пропи мають менше зчеплення з повітрям: P +4%, D −4%.");
   if (x.blades === 4) why.push("Чотирилопатеві пропи мають більше зчеплення: P −3%, D +5%.");
@@ -171,10 +178,11 @@ export function computeTune(x: BuildParams): TuneResult {
   if (powerRatio < 0.7) warnings.push("Силова установка слабка для такого пропа: борт буде млявий, а висіння на високому газі нагріває мотори.");
   if (weightRatio > 1.4) warnings.push("Борт значно важчий за типовий для цього розміру. Почніть з обережного висіння й перевірте нагрів.");
   if (weightRatio < 0.6) warnings.push("Вага дуже мала для такого пропа. Перевірте, чи введено злітну вагу з акумулятором.");
-  if (!x.rpmFilter && d >= 6) warnings.push('Для 6" і більше дуже радимо bidirectional DShot з RPM-фільтром: без нього шум на низьких частотах важко прибрати.');
-  if (!x.rpmFilter) warnings.push("Без RPM-фільтра фільтрація посилена. Це додає затримку; після першого польоту перевірте Blackbox.");
+  if (!x.rpmFilter) warnings.push("На великих бортах дуже радимо bidirectional DShot з RPM-фільтром: шум моторів низькочастотний, і без RPM-фільтра його важко прибрати без великої затримки.");
   if (x.motorPoles < 10 || x.motorPoles > 28) warnings.push("Нетипова кількість полюсів. Порахуйте магніти на дзвоні мотора: це і є кількість полюсів.");
-  if (d >= 10) warnings.push('Для 10" і більше евристика менш точна. Почніть з цих значень на прив\'язі і робіть тюн по Blackbox.');
+  if (d >= 13) warnings.push(`Для ${d}" евристика менш точна. Перший зліт робіть на прив'язі або на малій висоті, далі тюн по Blackbox.`);
+  if (motorHzHover < 60) warnings.push(`Шум моторів на висінні ≈ ${Math.round(motorHzHover)} Гц, нижче межі динамічного режекторного фільтра Betaflight (60 Гц). Покладайтеся на RPM-фільтр.`);
+  if (x.cells >= 12) warnings.push("Перевірте, що FC, ESC і BEC розраховані на напругу 12S.");
 
   return { pid, filters, extras, why, warnings, metrics: { master, powerRatio, weightRatio, motorHzMax, motorHzHover } };
 }

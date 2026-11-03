@@ -78,10 +78,10 @@ export function findPeaks(s: Spectrum, lo: number, hi: number, max = 3): Peak[] 
     if (a > s.amp[k - 1]! && a >= s.amp[k + 1]! && a > median * 4) cand.push({ hz: s.freqs[k]!, amp: a });
   }
   cand.sort((a, b) => b.amp - a.amp);
-  // Прибираємо сусідні піки ближче 15 Гц до вже вибраних.
+  // Прибираємо сусідні піки ближче 8 Гц до вже вибраних.
   const out: Peak[] = [];
   for (const p of cand) {
-    if (out.every((q) => Math.abs(q.hz - p.hz) > 15)) out.push(p);
+    if (out.every((q) => Math.abs(q.hz - p.hz) > 8)) out.push(p);
     if (out.length >= max) break;
   }
   return out;

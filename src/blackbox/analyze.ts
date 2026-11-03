@@ -12,9 +12,9 @@ export interface AxisAnalysis {
   spectrumFiltered: Spectrum | null;
   /** Найсильніші піки шуму до фільтрів */
   rawPeaks: Peak[];
-  /** Залишковий шум після фільтрів, RMS °/с у смузі 100 Гц і вище */
+  /** Залишковий шум після фільтрів, RMS °/с у смузі 80 Гц і вище */
   filteredHfRms: number;
-  /** Залишковий шум після фільтрів у смузі 20–100 Гц (пропвош, резонанси рами) */
+  /** Залишковий шум після фільтрів у смузі 20–80 Гц (пропвош, резонанси рами) */
   filteredLowRms: number;
 }
 
@@ -65,9 +65,9 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
       step: log.setpoint ? estimateStepResponse(log.setpoint[ax], log.gyro[ax], fs) : null,
       spectrumRaw,
       spectrumFiltered,
-      rawPeaks: spectrumRaw ? findPeaks(spectrumRaw, 60, nyq * 0.95, 4) : [],
-      filteredHfRms: spectrumFiltered ? bandRms(spectrumFiltered, 100, nyq) : 0,
-      filteredLowRms: spectrumFiltered ? bandRms(spectrumFiltered, 20, 100) : 0,
+      rawPeaks: spectrumRaw ? findPeaks(spectrumRaw, 30, nyq * 0.95, 4) : [],
+      filteredHfRms: spectrumFiltered ? bandRms(spectrumFiltered, 80, nyq) : 0,
+      filteredLowRms: spectrumFiltered ? bandRms(spectrumFiltered, 20, 80) : 0,
     };
     if (log.setpoint && !axes[ax].step) notes.push(`На осі ${ax} замало різких рухів стіків для оцінки відгуку.`);
   }
@@ -88,7 +88,7 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
       const sp = welch(raw.pitch, fs, 4, mask);
       if (!sr || !sp) continue;
       const combined: Spectrum = { freqs: sr.freqs, amp: sr.amp.map((v, k) => Math.hypot(v, sp.amp[k]!)) };
-      throttleBands.push({ label, lo, hi, peaks: findPeaks(combined, 60, nyq * 0.95, 6) });
+      throttleBands.push({ label, lo, hi, peaks: findPeaks(combined, 30, nyq * 0.95, 6) });
     }
   }
 
@@ -96,12 +96,19 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
   let motorNoiseTracksThrottle: boolean | null = null;
   if (throttleBands.length >= 2) {
     const all = throttleBands.flatMap((b) => b.peaks.map((p) => ({ ...p, band: b.label })));
+    // Резонанс: пік, що повторюється (±5 Гц) у найбільшій кількості діапазонів газу.
+    let best = { bands: 1, amp: 0 };
     for (const p of all) {
-      const bandsWith = new Set(all.filter((q) => Math.abs(q.hz - p.hz) <= 8).map((q) => q.band));
-      if (bandsWith.size >= 2 && (frameResonanceHz === null || p.hz < frameResonanceHz)) frameResonanceHz = Math.round(p.hz);
+      const same = all.filter((q) => Math.abs(q.hz - p.hz) <= 5);
+      const bands = new Set(same.map((q) => q.band)).size;
+      const amp = same.reduce((s, q) => s + q.amp, 0);
+      if (bands >= 2 && (bands > best.bands || (bands === best.bands && amp > best.amp))) {
+        best = { bands, amp };
+        frameResonanceHz = Math.round(same.reduce((s, q) => s + q.hz, 0) / same.length);
+      }
     }
     const tops = throttleBands
-      .map((b) => b.peaks.find((p) => frameResonanceHz === null || Math.abs(p.hz - frameResonanceHz) > 8))
+      .map((b) => b.peaks.find((p) => frameResonanceHz === null || Math.abs(p.hz - frameResonanceHz) > 6))
       .filter((p): p is Peak => !!p)
       .map((p) => p.hz);
     if (tops.length >= 2) motorNoiseTracksThrottle = tops[tops.length - 1]! > tops[0]! * 1.25;

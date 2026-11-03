@@ -18,6 +18,11 @@ export interface SynthOptions {
   frameHz?: number;
   /** Амплітуда шуму моторів, °/с */
   motorNoise?: number;
+  /** Основна частота моторів на нульовому газі і її приріст до повного газу, Гц */
+  motorHzIdle?: number;
+  motorHzSpan?: number;
+  /** Частота PT2-фільтра гіроскопа, Гц */
+  gyroLpfHz?: number;
 }
 
 export function mulberry32(seed: number): () => number {
@@ -93,11 +98,11 @@ export function synthLogCsv(o: SynthOptions = {}): string {
   let phase = 0;
   const motorPhase = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    const fMotor = 110 + 480 * throttle[i]!;
+    const fMotor = (o.motorHzIdle ?? 110) + (o.motorHzSpan ?? 480) * throttle[i]!;
     phase += 2 * Math.PI * fMotor * dt;
     motorPhase[i] = phase;
   }
-  const alpha = 1 - Math.exp(-2 * Math.PI * 110 * dt); // PT2 ~110 Гц
+  const alpha = 1 - Math.exp(-2 * Math.PI * (o.gyroLpfHz ?? 110) * dt);
   for (let ax = 0; ax < 3; ax++) {
     const u = new Float64Array(n);
     const f = new Float64Array(n);

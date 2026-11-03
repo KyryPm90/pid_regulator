@@ -12,15 +12,16 @@ import { synthLogCsv } from "./sim/synthLog";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const PRESETS: Record<string, Partial<BuildParams>> = {
-  whoop: { prop: 2.5, pitch: 2, blades: 4, frame: "ducted", stator: "1404", kv: 4600, cells: 4, auw: 240, style: "cinematic", motorPoles: 12, rpmFilter: true },
-  three: { prop: 3.5, pitch: 2.5, blades: 3, frame: "open", stator: "1804", kv: 2800, cells: 6, auw: 330, style: "freestyle", motorPoles: 12, rpmFilter: true },
-  five: { prop: 5, pitch: 4.3, blades: 3, frame: "open", stator: "2207", kv: 1950, cells: 6, auw: 680, style: "freestyle", motorPoles: 14, rpmFilter: true },
-  race: { prop: 5.1, pitch: 4.8, blades: 3, frame: "open", stator: "2306", kv: 2050, cells: 6, auw: 560, style: "race", motorPoles: 14, rpmFilter: true },
-  seven: { prop: 7, pitch: 4, blades: 2, frame: "open", stator: "2807", kv: 1300, cells: 6, auw: 1050, style: "longrange", motorPoles: 14, rpmFilter: true },
-  ten: { prop: 10, pitch: 5, blades: 3, frame: "open", stator: "3115", kv: 900, cells: 6, auw: 2600, style: "cinematic", motorPoles: 14, rpmFilter: true },
+  p8: { prop: 8, pitch: 4.5, blades: 3, frame: "open", stator: "2812", kv: 1000, cells: 6, auw: 1600, style: "longrange", motorPoles: 14, rpmFilter: true },
+  p10: { prop: 10, pitch: 5, blades: 3, frame: "open", stator: "3115", kv: 900, cells: 6, auw: 2600, style: "longrange", motorPoles: 14, rpmFilter: true },
+  p13: { prop: 13, pitch: 6.5, blades: 2, frame: "open", stator: "4214", kv: 480, cells: 12, auw: 5000, style: "cinematic", motorPoles: 24, rpmFilter: true },
+  p15: { prop: 15, pitch: 7, blades: 2, frame: "open", stator: "4215", kv: 400, cells: 12, auw: 7000, style: "cinematic", motorPoles: 24, rpmFilter: true },
+  p21: { prop: 21, pitch: 7, blades: 2, frame: "open", stator: "6215", kv: 170, cells: 12, auw: 16000, style: "cinematic", motorPoles: 28, rpmFilter: true },
 };
 
-const STORE_KEY = "fpv-pid-tuner:build";
+const STORE_KEY = "fpv-pid-tuner:build-large";
+/** Синтетичний 10": повільніший контур, шум моторів 40–210 Гц, резонанс рами 95 Гц. */
+const DEMO_10_INCH = { seconds: 30, wn: 55, delayMs: 6, frameHz: 95, motorHzIdle: 40, motorHzSpan: 170, gyroLpfHz: 70, zeta: [0.4, 0.48, 0.8] as [number, number, number] };
 const AXIS_NAME: Record<Axis, string> = { roll: "Roll", pitch: "Pitch", yaw: "Yaw" };
 const AXIS_COLOR: Record<Axis, string> = { roll: "--s-roll", pitch: "--s-pitch", yaw: "--s-yaw" };
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -35,7 +36,7 @@ function readParams(): BuildParams {
     return Number.isFinite(v) && v > 0 ? v : fallback;
   };
   return {
-    prop: num("prop", 5),
+    prop: num("prop", 10),
     pitch: num("pitch", 4),
     blades: Number($<HTMLSelectElement>("blades").value) as 2 | 3 | 4,
     frame: $<HTMLSelectElement>("frame").value as BuildParams["frame"],
@@ -135,8 +136,8 @@ function renderAnalysis(a: LogAnalysis, adj: Adjustment, base: Tune) {
     return s ? [{ x: s.t, y: s.y, color: css(AXIS_COLOR[ax]), label: AXIS_NAME[ax] }] : [];
   });
   drawChart($<HTMLCanvasElement>("stepChart"), stepSeries, {
-    xMin: 0, xMax: 300, yMin: 0, yMax: 1.6, xLabel: "мс", yLabel: "відгук",
-    xTicks: [0, 50, 100, 150, 200, 250, 300], yTicks: [0, 0.5, 1, 1.5],
+    xMin: 0, xMax: 500, yMin: 0, yMax: 1.6, xLabel: "мс", yLabel: "відгук",
+    xTicks: [0, 100, 200, 300, 400, 500], yTicks: [0, 0.5, 1, 1.5],
     markers: [{ y: 1, label: "", color: css("--muted") }],
   });
   $("stepLegend").innerHTML = AXES.map((ax) => {
@@ -157,7 +158,7 @@ function renderSpectrum(a: LogAnalysis, base: Tune) {
   const raw = a.axes[ax].spectrumRaw;
   const filt = a.axes[ax].spectrumFiltered;
   const db = (s: { amp: Float64Array }) => Array.from(s.amp, (v) => 20 * Math.log10(v + 1e-3));
-  const xMax = Math.min(1000, Math.floor(a.sampleRate / 2 / 100) * 100);
+  const xMax = Math.min(600, Math.floor(a.sampleRate / 2 / 100) * 100);
   const series = [];
   if (raw && a.hasUnfiltered) series.push({ x: raw.freqs, y: db(raw), color: css("--s-raw"), label: "до фільтрів", width: 1.2 });
   if (filt) series.push({ x: filt.freqs, y: db(filt), color: css("--s-filt"), label: "після фільтрів" });
@@ -165,7 +166,7 @@ function renderSpectrum(a: LogAnalysis, base: Tune) {
   if (a.frameResonanceHz) markers.push({ x: a.frameResonanceHz, label: "рама", color: css("--amber") });
   drawChart($<HTMLCanvasElement>("specChart"), series, {
     xMin: 0, xMax, yMin: -40, yMax: 20, xLabel: "Гц", yLabel: "дБ (°/с)",
-    xTicks: Array.from({ length: Math.floor(xMax / 200) + 1 }, (_, i) => i * 200), yTicks: [-40, -20, 0, 20],
+    xTicks: Array.from({ length: Math.floor(xMax / 100) + 1 }, (_, i) => i * 100), yTicks: [-40, -20, 0, 20],
     markers,
   });
   $("specLegend").innerHTML = series.map((s) => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join("");
@@ -219,7 +220,7 @@ $<HTMLInputElement>("logFile").addEventListener("change", (e) => {
   if (file) void loadLog(() => file.text(), file.name);
 });
 $("demoLog").addEventListener("click", () => {
-  void loadLog(async () => synthLogCsv({ seconds: 30 }), "приклад логу (синтетичний 5\")");
+  void loadLog(async () => synthLogCsv(DEMO_10_INCH), "приклад логу (синтетичний 10\")");
 });
 $("copy").addEventListener("click", () => {
   const btn = $("copy");
