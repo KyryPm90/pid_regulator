@@ -105,7 +105,7 @@ export function cliValuesFromLogHeaders(h: Record<string, string>): CliValues {
   for (const k of [
     "dyn_notch_count", "dyn_notch_q", "dyn_notch_min_hz", "dyn_notch_max_hz",
     "rpm_filter_harmonics", "rpm_filter_min_hz", "motor_poles", "dyn_idle_min_rpm",
-    "tpa_rate", "tpa_breakpoint", "thrust_linear", "anti_gravity_gain", "iterm_relax_cutoff",
+    "tpa_rate", "tpa_breakpoint", "thrust_linear", "anti_gravity_gain", "vbat_sag_compensation", "iterm_relax_cutoff",
     "feedforward_smooth_factor", "feedforward_jitter_factor", "feedforward_boost", "thr_mid", "thr_expo",
   ]) {
     if (h[k] !== undefined) out[k] = h[k]!;

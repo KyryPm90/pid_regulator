@@ -17,6 +17,8 @@ export interface FlightLog {
   setpoint: Record<Axis, Float64Array> | null;
   /** Газ у діапазоні 0..1 */
   throttle: Float64Array | null;
+  /** Напруга батареї (одиниці як у лозі), якщо записана */
+  vbat: Float64Array | null;
   /** Виходи моторів, як записано в лозі */
   motors: Float64Array[];
   /** Метадані з заголовка логу, якщо вони є в CSV */
@@ -62,7 +64,8 @@ export function parseBlackboxCsv(text: string): FlightLog {
   }
   const n = rows.length;
   const column = (name: string): Float64Array | null => {
-    const c = name === "time" ? timeCol : header.indexOf(name);
+    // Blackbox Explorer додає одиниці до назви колонки: "vbatLatest (V)".
+    const c = name === "time" ? timeCol : header.findIndex((h) => h === name || h.startsWith(`${name} (`));
     if (c < 0) return null;
     const out = new Float64Array(n);
     for (let r = 0; r < n; r++) out[r] = Number(rows[r]![c]);
@@ -125,6 +128,7 @@ export function buildFlightLog(
     gyroUnfilt: byAxis("gyroUnfilt"),
     setpoint: byAxis("setpoint"),
     throttle,
+    vbat: column("vbatLatest"),
     motors,
     meta,
   };

@@ -3,7 +3,7 @@ import type { Axis, FilterSettings, Tune } from "./types";
 import { clamp, round10, round5 } from "./tuner";
 
 export interface Change {
-  group: "PID" | "Фільтри" | "Рейти";
+  group: "PID" | "Фільтри" | "Рейти" | "Динаміка";
   param: string;
   from: number;
   to: number;
@@ -79,6 +79,7 @@ export function adjustFromLog(base: Tune, a: LogAnalysis): Adjustment {
 
   tuneFilters(tune, a, hfNoise, changes, findings);
   tuneRates(tune, a, changes, findings);
+  tuneDynamics(tune, a, changes, findings);
 
   if (!changes.length) findings.push("Відгук, шум і рейти в межах норми. Змінювати налаштування не потрібно.");
   return { tune, changes, findings };
@@ -188,5 +189,57 @@ export function tuneRates(tune: Tune, a: LogAnalysis, changes: Change[], finding
     const used = Math.max(a.setpointP99.roll / r.roll.max, a.setpointP99.pitch / r.pitch.max);
     if (used > 0.97) findings.push("Ви часто доводите стік до упору: якщо бракує швидкості обертання, підніміть максимальні рейти.");
     else if (used < 0.45) findings.push(`У польоті використано лише ${Math.round(used * 100)}% максимальних рейтів по крену й тангажу. Для плавнішого керування можна знизити max rate або підняти експо.`);
+  }
+}
+
+/** Пороги для правил динаміки (TPA, anti-gravity, просідання батареї). */
+export const TPA_RATIO = 1.6;
+export const PUNCH_RATIO = 1.8;
+export const SAG_NOTICE = 0.1;
+
+/**
+ * Правила, важливі для важких бортів:
+ * TPA — коли на високому газі борт коливається помітно сильніше, ніж на середньому;
+ * anti-gravity — коли під час різких змін газу борт гірше тримає кут;
+ * vbat_sag_compensation — коли батарея помітно просідає під навантаженням.
+ */
+export function tuneDynamics(tune: Tune, a: LogAnalysis, changes: Change[], findings: string[]): void {
+  const e = tune.extras;
+  const osc = a.throttleOscillation;
+  if (osc && osc.mid > 0 && osc.high / osc.mid > TPA_RATIO && osc.high > 0.8) {
+    const ratio = (osc.high / osc.mid).toFixed(1);
+    const rate = clamp(e.tpa_rate + 10, 0, 90);
+    if (rate !== e.tpa_rate) {
+      changes.push({ group: "Динаміка", param: "tpa_rate", from: e.tpa_rate, to: rate, reason: `На високому газі коливання в ${ratio} раза сильніші, ніж на середньому: TPA сильніше прибирає PD на газу` });
+      e.tpa_rate = rate;
+    }
+    if (a.hoverThrottle !== null) {
+      // Точка початку TPA трохи вище газу висіння, щоб на висінні PD лишався повним.
+      const bp = clamp(round10(1000 + (a.hoverThrottle + 0.08) * 1000), 1200, 1600);
+      if (bp !== e.tpa_breakpoint) {
+        changes.push({ group: "Динаміка", param: "tpa_breakpoint", from: e.tpa_breakpoint, to: bp, reason: `TPA починає діяти трохи вище газу висіння (${Math.round(a.hoverThrottle * 100)}%)` });
+        e.tpa_breakpoint = bp;
+      }
+    }
+  }
+
+  if (a.punchErrorRatio !== null && a.punchErrorRatio > PUNCH_RATIO) {
+    const to = clamp(round5(e.anti_gravity_gain * 1.25), 0, 150);
+    if (to !== e.anti_gravity_gain) {
+      changes.push({ group: "Динаміка", param: "anti_gravity_gain", from: e.anti_gravity_gain, to, reason: `При різкій зміні газу похибка утримання кута в ${a.punchErrorRatio.toFixed(1)} раза більша, ніж у спокої` });
+      e.anti_gravity_gain = to;
+    }
+  }
+
+  if (a.batterySag !== null) {
+    const pct = Math.round(a.batterySag * 100);
+    if (a.batterySag >= SAG_NOTICE) {
+      const to = a.batterySag >= 0.18 ? 100 : 80;
+      if (to > e.vbat_sag_compensation) {
+        changes.push({ group: "Динаміка", param: "vbat_sag_compensation", from: e.vbat_sag_compensation, to, reason: `На повному газі напруга просідає приблизно на ${pct}%: компенсація зберігає однаковий відгук від повної до розрядженої батареї` });
+        e.vbat_sag_compensation = to;
+      }
+      if (a.batterySag >= 0.2) findings.push(`Просідання батареї ≈${pct}% на повному газі. Для такого борта батарея слабка: перевірте C-рейтинг, стан банок і роз'єм.`);
+    }
   }
 }
