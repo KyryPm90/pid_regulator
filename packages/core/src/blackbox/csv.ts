@@ -48,16 +48,9 @@ export function parseBlackboxCsv(text: string): FlightLog {
     if (cells.length >= 2 && cells[0]) meta[cells[0]] = cells.slice(1).join(",");
   }
   const header = splitRow(lines[headerIdx]!);
-  const col = (name: string) => header.indexOf(name);
   const timeCol = header.findIndex((h) => /^time/i.test(h));
   if (timeCol < 0) throw new LogParseError("У файлі немає колонки часу (time).");
   const timeInUs = /us|µs/i.test(header[timeCol]!) || !/\(s\)/.test(header[timeCol]!);
-
-  const gyroCols = [0, 1, 2].map((i) => col(`gyroADC[${i}]`));
-  const unfiltCols = [0, 1, 2].map((i) => col(`gyroUnfilt[${i}]`));
-  const spCols = [0, 1, 2].map((i) => col(`setpoint[${i}]`));
-  const thrCol = col("rcCommand[3]");
-  const motorCols = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => col(`motor[${i}]`)).filter((c) => c >= 0);
 
   const rows: string[][] = [];
   for (let i = headerIdx + 1; i < lines.length; i++) {
@@ -68,18 +61,32 @@ export function parseBlackboxCsv(text: string): FlightLog {
     rows.push(cells);
   }
   const n = rows.length;
-  if (n < 512) throw new LogParseError(`Замало даних: ${n} рядків. Потрібно хоча б кілька секунд польоту.`);
-
-  const column = (c: number) => {
+  const column = (name: string): Float64Array | null => {
+    const c = name === "time" ? timeCol : header.indexOf(name);
+    if (c < 0) return null;
     const out = new Float64Array(n);
     for (let r = 0; r < n; r++) out[r] = Number(rows[r]![c]);
     return out;
   };
+  return buildFlightLog(column, n, timeInUs ? 1e-6 : 1, meta);
+}
 
-  const rawTime = column(timeCol);
+/**
+ * Збирає FlightLog з колонок логу (спільне для CSV і бінарного .bbl).
+ * `column(name)` повертає колонку за іменем поля Betaflight або null; "time" — колонка часу.
+ */
+export function buildFlightLog(
+  column: (name: string) => Float64Array | null,
+  n: number,
+  timeScale: number,
+  meta: Record<string, string>,
+): FlightLog {
+  if (n < 512) throw new LogParseError(`Замало даних: ${n} кадрів. Потрібно хоча б кілька секунд польоту.`);
+  const rawTime = column("time");
+  if (!rawTime) throw new LogParseError("У логу немає поля часу (time).");
   const t0 = rawTime[0]!;
   const time = new Float64Array(n);
-  for (let r = 0; r < n; r++) time[r] = (rawTime[r]! - t0) / (timeInUs ? 1e6 : 1);
+  for (let r = 0; r < n; r++) time[r] = (rawTime[r]! - t0) * timeScale;
 
   // Частота запису за медіаною кроку часу: стійко до пропусків кадрів.
   const steps: number[] = [];
@@ -89,20 +96,24 @@ export function parseBlackboxCsv(text: string): FlightLog {
   if (!(dt > 0)) throw new LogParseError("Не вдалося визначити частоту запису з колонки часу.");
   const sampleRate = 1 / dt;
 
-  const byAxis = (cols: number[]): Record<Axis, Float64Array> | null => {
-    if (cols.some((c) => c < 0)) return null;
+  const byAxis = (prefix: string): Record<Axis, Float64Array> | null => {
+    const cols = [0, 1, 2].map((i) => column(`${prefix}[${i}]`));
+    if (cols.some((c) => !c)) return null;
     const out = {} as Record<Axis, Float64Array>;
-    AXES.forEach((ax, i) => (out[ax] = column(cols[i]!)));
+    AXES.forEach((ax, i) => (out[ax] = cols[i]!));
     return out;
   };
 
-  const gyro = byAxis(gyroCols);
+  const gyro = byAxis("gyroADC");
   if (!gyro) throw new LogParseError("Не знайдено всі три осі gyroADC.");
 
-  let throttle: Float64Array | null = null;
-  if (thrCol >= 0) {
-    throttle = column(thrCol);
-    for (let r = 0; r < n; r++) throttle[r] = Math.min(1, Math.max(0, (throttle[r]! - 1000) / 1000));
+  const throttle = column("rcCommand[3]");
+  if (throttle) for (let r = 0; r < n; r++) throttle[r] = Math.min(1, Math.max(0, (throttle[r]! - 1000) / 1000));
+
+  const motors: Float64Array[] = [];
+  for (let i = 0; i < 8; i++) {
+    const m = column(`motor[${i}]`);
+    if (m) motors.push(m);
   }
 
   return {
@@ -111,10 +122,10 @@ export function parseBlackboxCsv(text: string): FlightLog {
     length: n,
     time,
     gyro,
-    gyroUnfilt: byAxis(unfiltCols),
-    setpoint: byAxis(spCols),
+    gyroUnfilt: byAxis("gyroUnfilt"),
+    setpoint: byAxis("setpoint"),
     throttle,
-    motors: motorCols.map(column),
+    motors,
     meta,
   };
 }

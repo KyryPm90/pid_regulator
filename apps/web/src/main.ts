@@ -11,10 +11,14 @@ import {
   type Adjustment,
   actualRate,
   parseBlackboxCsv,
+  parseBlackboxBinary,
+  isBlackboxBinary,
+  BblParseError,
   LogParseError,
   analyzeLog,
   type LogAnalysis,
-  synthLogCsv,
+  synthBbl,
+  type FlightLog,
 } from "@pid/core";
 import { drawChart } from "./ui/chart";
 import { FlightController, FcError } from "./serial/fc";
@@ -219,22 +223,34 @@ function setStatus(text: string, error = false) {
   el.classList.toggle("error", error);
 }
 
-async function loadLog(getText: () => Promise<string>, name: string) {
+/** Розбирає файл логу: бінарний .bbl/.bfl або CSV. */
+function parseLogBytes(bytes: Uint8Array): { log: FlightLog; note: string } {
+  if (isBlackboxBinary(bytes)) {
+    const log = parseBlackboxBinary(bytes);
+    const parts: string[] = [];
+    if (log.sessions > 1) parts.push(`у файлі ${log.sessions} ${log.sessions < 5 ? "сесії" : "сесій"}, взято найдовшу`);
+    if (log.corrupt) parts.push(`пропущено пошкоджених кадрів: ${log.corrupt}`);
+    if (!log.gyroUnfilt) parts.push("у лозі немає gyroUnfilt, шум до фільтрів оцінено приблизно");
+    return { log, note: parts.length ? ` (${parts.join("; ")})` : "" };
+  }
+  return { log: parseBlackboxCsv(new TextDecoder().decode(bytes)), note: "" };
+}
+
+async function loadLog(getBytes: () => Promise<Uint8Array>, name: string) {
   setStatus(`Аналізую ${name}…`);
   await new Promise((r) => setTimeout(r, 30));
   try {
-    const text = await getText();
-    const log = parseBlackboxCsv(text);
+    const { log, note } = parseLogBytes(await getBytes());
     analysis = analyzeLog(log);
     mode = "log";
     render();
     const n = adjustment?.changes.length ?? 0;
-    setStatus(`${name}: ${Math.round(log.duration)} с польоту. ${n ? `Запропоновано ${n} змін, CLI нижче вже їх містить.` : "Змін не потрібно."}`);
+    setStatus(`${name}: ${Math.round(log.duration)} с польоту${note}. ${n ? `Запропоновано ${n} змін, CLI нижче вже їх містить.` : "Змін не потрібно."}`);
   } catch (e) {
     analysis = null;
     $("bbResult").hidden = true;
     render();
-    setStatus(e instanceof LogParseError ? e.message : `Не вдалося обробити файл: ${(e as Error).message}`, true);
+    setStatus(e instanceof LogParseError || e instanceof BblParseError ? e.message : `Не вдалося обробити файл: ${(e as Error).message}`, true);
   }
 }
 
@@ -258,10 +274,10 @@ $("modeSeg").querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
 $("specAxis").addEventListener("change", () => analysis && renderSpectrum(analysis, computeTune(readParams())));
 $<HTMLInputElement>("logFile").addEventListener("change", (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
-  if (file) void loadLog(() => file.text(), file.name);
+  if (file) void loadLog(async () => new Uint8Array(await file.arrayBuffer()), file.name);
 });
 $("demoLog").addEventListener("click", () => {
-  void loadLog(async () => synthLogCsv(DEMO_10_INCH), "приклад логу (синтетичний 10\")");
+  void loadLog(async () => synthBbl(DEMO_10_INCH).bytes, "приклад логу (синтетичний 10\", .bbl)");
 });
 $("copy").addEventListener("click", () => {
   const btn = $("copy");
