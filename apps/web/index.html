@@ -110,10 +110,10 @@
     <div class="bb-head">
       <div>
         <h2>Корекція за Blackbox</h2>
-        <p class="hint">Налаштуйте Blackbox на 1–2 кГц, увімкніть запис gyroUnfilt, політайте 1–2 хвилини з різкими нахилами по крену й тангажу, поворотами та змінами газу. Відкрийте лог у Blackbox Explorer і експортуйте CSV, потім завантажте його сюди. Тюнер автоматично підбере фільтри (LPF, RPM, режекторний) і рейти (газ висіння, максимальні швидкості) за логом. Файл обробляється тільки у вашому браузері.</p>
+        <p class="hint">Налаштуйте Blackbox на 1–2 кГц, увімкніть запис gyroUnfilt, політайте 1–2 хвилини з різкими нахилами по крену й тангажу, поворотами та змінами газу. Завантажте сюди файл логу з SD-карти чи флешу польотника (.bbl, .bfl, .txt) або CSV з Blackbox Explorer. Тюнер автоматично підбере фільтри (LPF, RPM, режекторний) і рейти (газ висіння, максимальні швидкості) за логом. Файл обробляється тільки у вашому браузері.</p>
       </div>
       <div class="bb-actions">
-        <label class="file-btn" for="logFile">Завантажити CSV<input id="logFile" type="file" accept=".csv,text/csv"></label>
+        <label class="file-btn" for="logFile">Завантажити лог<input id="logFile" type="file" accept=".bbl,.bfl,.txt,.csv,text/csv"></label>
         <button type="button" class="ghost" id="demoLog">Спробувати на прикладі</button>
       </div>
     </div>
