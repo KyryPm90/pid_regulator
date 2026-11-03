@@ -126,3 +126,8 @@ tr.diff td { color: var(--accent); font-weight: 600; }
 .ghost.danger { border-color: var(--amber); color: var(--amber); }
 .foot { color: var(--muted); font-size: 13px; margin: 0; max-width: 90ch; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.cmp-summary { margin: 4px 0 10px; font-weight: 600; }
+.v-better { color: var(--ok); font-weight: 600; }
+.v-worse { color: var(--amber); font-weight: 600; }
+.v-same { color: var(--muted); }

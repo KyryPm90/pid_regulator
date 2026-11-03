@@ -16,6 +16,7 @@ import {
   BblParseError,
   LogParseError,
   analyzeLog,
+  compareLogs,
   type LogAnalysis,
   synthBbl,
   type FlightLog,
@@ -42,6 +43,9 @@ const AXIS_COLOR: Record<Axis, string> = { roll: "--s-roll", pitch: "--s-pitch",
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 let analysis: LogAnalysis | null = null;
+let analysisName = "";
+/** Попередній лог для порівняння «до/після» */
+let previous: { a: LogAnalysis; name: string } | null = null;
 let adjustment: Adjustment | null = null;
 let mode: "base" | "log" = "log";
 let currentCli = "";
@@ -180,6 +184,13 @@ function renderAnalysis(a: LogAnalysis, adj: Adjustment, base: Tune) {
     const s = a.axes[ax].step;
     return s ? [{ x: s.t, y: s.y, color: css(AXIS_COLOR[ax]), label: AXIS_NAME[ax] }] : [];
   });
+  if (previous) {
+    for (const ax of ["roll", "pitch"] as const) {
+      const s = previous.a.axes[ax].step;
+      if (s) stepSeries.unshift({ x: s.t, y: s.y, color: css(AXIS_COLOR[ax]), label: `${AXIS_NAME[ax]} до`, width: 1.2, dash: [5, 4] } as (typeof stepSeries)[number]);
+    }
+  }
+  renderComparison(a);
   drawChart($<HTMLCanvasElement>("stepChart"), stepSeries, {
     xMin: 0, xMax: 500, yMin: 0, yMax: 1.6, xLabel: "мс", yLabel: "відгук",
     xTicks: [0, 100, 200, 300, 400, 500], yTicks: [0, 0.5, 1, 1.5],
@@ -196,6 +207,20 @@ function renderAnalysis(a: LogAnalysis, adj: Adjustment, base: Tune) {
     ? adj.changes.map((c) => `<tr><td>${c.param}<span class="d">${c.group}</span></td><td>${c.from}</td><td>${c.to}${c.group === "PID" ? delta(c.to, c.from) : ""}</td><td>${c.reason}</td></tr>`).join("")
     : `<tr><td colspan="4">Змін немає</td></tr>`;
   $("findings").innerHTML = [...a.notes, ...adj.findings].map((t) => `<li>${t}</li>`).join("");
+}
+
+const fmt = (v: number | null, unit: string) => (v === null ? "немає" : `${v < 10 ? v.toFixed(unit === "мс" ? 1 : 2) : v.toFixed(0)} ${unit}`);
+const VERDICT_CLASS: Record<string, string> = { "краще": "v-better", "гірше": "v-worse", "без змін": "v-same", "немає даних": "v-same" };
+
+function renderComparison(a: LogAnalysis) {
+  $("cmpBox").hidden = !previous;
+  if (!previous) return;
+  const c = compareLogs(previous.a, a);
+  $("cmpTitle").textContent = `Порівняння: ${previous.name} → ${analysisName}`;
+  $("cmpSummary").textContent = c.summary;
+  $("cmpBody").innerHTML = c.rows
+    .map((r) => `<tr><td>${r.metric}${r.axis ? `<span class="d">${AXIS_NAME[r.axis]}</span>` : ""}</td><td>${fmt(r.before, r.unit)}</td><td>${fmt(r.after, r.unit)}</td><td class="${VERDICT_CLASS[r.verdict]}">${r.verdict}</td></tr>`)
+    .join("");
 }
 
 function renderSpectrum(a: LogAnalysis, base: Tune) {
@@ -241,11 +266,15 @@ async function loadLog(getBytes: () => Promise<Uint8Array>, name: string) {
   await new Promise((r) => setTimeout(r, 30));
   try {
     const { log, note } = parseLogBytes(await getBytes());
-    analysis = analyzeLog(log);
+    const fresh = analyzeLog(log);
+    if (analysis) previous = { a: analysis, name: analysisName };
+    analysis = fresh;
+    analysisName = name;
     mode = "log";
     render();
     const n = adjustment?.changes.length ?? 0;
-    setStatus(`${name}: ${Math.round(log.duration)} с польоту${note}. ${n ? `Запропоновано ${n} змін, CLI нижче вже їх містить.` : "Змін не потрібно."}`);
+    const next = previous ? "" : " Після польоту з новими налаштуваннями завантажте наступний лог, щоб побачити порівняння.";
+    setStatus(`${name}: ${Math.round(log.duration)} с польоту${note}. ${n ? `Запропоновано ${n} змін, CLI нижче вже їх містить.` : "Змін не потрібно."}${next}`);
   } catch (e) {
     analysis = null;
     $("bbResult").hidden = true;
@@ -271,13 +300,20 @@ $("modeSeg").querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
     render();
   }),
 );
+$("cmpReset").addEventListener("click", () => {
+  previous = null;
+  render();
+});
 $("specAxis").addEventListener("change", () => analysis && renderSpectrum(analysis, computeTune(readParams())));
 $<HTMLInputElement>("logFile").addEventListener("change", (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (file) void loadLog(async () => new Uint8Array(await file.arrayBuffer()), file.name);
 });
 $("demoLog").addEventListener("click", () => {
-  void loadLog(async () => synthBbl(DEMO_10_INCH).bytes, "приклад логу (синтетичний 10\", .bbl)");
+  // Повторне натискання показує «лог після тюну», щоб було видно порівняння.
+  const after = analysisName.startsWith("приклад");
+  const opts = after ? { ...DEMO_10_INCH, seed: 11, zeta: [0.55, 0.6, 0.8] as [number, number, number], motorNoise: 7 } : DEMO_10_INCH;
+  void loadLog(async () => synthBbl(opts).bytes, after ? "приклад після тюну" : "приклад логу (синтетичний 10\", .bbl)");
 });
 $("copy").addEventListener("click", () => {
   const btn = $("copy");
