@@ -143,6 +143,7 @@ export function computeTune(x: BuildParams): TuneResult {
     tpa_breakpoint: powerRatio > 1.15 ? 1250 : powerRatio < 0.9 ? 1450 : 1350,
     thrust_linear: ducted ? 25 : 0,
     anti_gravity_gain: st.antiGravity,
+    vbat_sag_compensation: 0,
     iterm_relax_cutoff: st.relax,
     feedforward_smooth_factor: st.smooth,
     feedforward_jitter_factor: st.jitter,

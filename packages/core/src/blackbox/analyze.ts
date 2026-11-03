@@ -48,6 +48,12 @@ export interface LogAnalysis {
   motorHarmonics: number | null;
   /** Газ висіння (0..1): медіана газу, коли стіки крену й тангажу майже в центрі */
   hoverThrottle: number | null;
+  /** Коливання після фільтрів (30 Гц і вище, roll+pitch, °/с) на середньому і високому газі: для TPA */
+  throttleOscillation: { mid: number; high: number } | null;
+  /** У скільки разів похибка утримання кута більша під час різких змін газу, ніж у спокої: для anti-gravity */
+  punchErrorRatio: number | null;
+  /** Просідання напруги на повному газі відносно холостого, частка (0.12 = 12%) */
+  batterySag: number | null;
   /** 99-й перцентиль заданої швидкості обертання, °/с: скільки з рейтів реально використано */
   setpointP99: Record<Axis, number> | null;
   notes: string[];
@@ -187,6 +193,91 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
     }
   }
 
+  // TPA: чи сильніше коливається борт після фільтрів на високому газі, ніж на середньому.
+  let throttleOscillation: { mid: number; high: number } | null = null;
+  if (log.throttle) {
+    const thr = log.throttle;
+    const rmsAt = (lo: number, hi: number) => {
+      const mask = (a: number, b: number) => {
+        let s = 0;
+        for (let i = a; i < b; i += 16) s += thr[i]!;
+        const m = s / Math.ceil((b - a) / 16);
+        return m >= lo && m < hi;
+      };
+      const r = welch(log.gyro.roll, fs, 4, mask);
+      const p = welch(log.gyro.pitch, fs, 4, mask);
+      return r && p ? Math.hypot(bandRms(r, 30, nyq * 0.9), bandRms(p, 30, nyq * 0.9)) : null;
+    };
+    const mid = rmsAt(0.35, 0.55);
+    const high = rmsAt(0.6, 1.01);
+    if (mid !== null && high !== null) throttleOscillation = { mid, high };
+  }
+
+  // Anti-gravity: похибка утримання кута (низькі частоти, до ~20 Гц) при різких змінах газу і стіках біля центру.
+  let punchErrorRatio: number | null = null;
+  if (log.throttle && log.setpoint) {
+    const thr = log.throttle;
+    const sp = log.setpoint;
+    const k = Math.max(1, Math.round(fs * 0.02));
+    // Ковзне середнє похибки прибирає шум моторів і рами, лишаючи повільний «провал» кута.
+    const lowErr = (ax: "roll" | "pitch") => {
+      const out = new Float64Array(log.length);
+      let acc = 0;
+      for (let i = 0; i < log.length; i++) {
+        acc += sp[ax][i]! - log.gyro[ax][i]!;
+        if (i >= k) acc -= sp[ax][i - k]! - log.gyro[ax][i - k]!;
+        out[i] = acc / Math.min(i + 1, k);
+      }
+      return out;
+    };
+    const er = lowErr("roll");
+    const ep = lowErr("pitch");
+    // Стіки мають бути біля центру ще 100 мс до і після, інакше похибка — це просто відставання від стіка.
+    const w = Math.round(fs * 0.1);
+    const still = (i: number) =>
+      [i - w, i, i + w].every((j) => j >= 0 && j < log.length && Math.abs(sp.roll[j]!) <= 15 && Math.abs(sp.pitch[j]!) <= 15);
+    const fast: number[] = [];
+    const calm: number[] = [];
+    for (let i = k; i < log.length - k; i += 2) {
+      if (!still(i)) continue;
+      const e = Math.hypot(er[i]!, ep[i]!);
+      const rate = Math.abs(thr[i + k]! - thr[i - k]!) / ((2 * k) / fs);
+      if (rate > 1.5) fast.push(e);
+      else if (rate < 0.3) calm.push(e);
+    }
+    // Медіана стійка до поодиноких різких рухів, які не стосуються газу.
+    const median = (v: number[]) => v.sort((a, b) => a - b)[Math.floor(v.length / 2)]!;
+    if (fast.length > fs * 0.1 && calm.length > fs * 0.5) punchErrorRatio = median(fast) / Math.max(0.5, median(calm));
+  }
+
+  // Просідання батареї: vbat = a + b·газ + c·час (час враховує розряд за політ).
+  let batterySag: number | null = null;
+  if (log.vbat && log.throttle) {
+    const v = log.vbat, thr = log.throttle, t = log.time;
+    let n = 0;
+    const S = { t: 0, x: 0, y: 0, tt: 0, xx: 0, tx: 0, ty: 0, xy: 0 };
+    for (let i = 0; i < log.length; i += 8) {
+      if (!(v[i]! > 0)) continue;
+      const x = thr[i]!, ti = t[i]!, y = v[i]!;
+      n++;
+      S.t += ti; S.x += x; S.y += y; S.tt += ti * ti; S.xx += x * x; S.tx += ti * x; S.ty += ti * y; S.xy += x * y;
+    }
+    if (n > 200) {
+      // Нормальні рівняння для 3 параметрів (метод Крамера).
+      const A = [[n, S.x, S.t], [S.x, S.xx, S.tx], [S.t, S.tx, S.tt]];
+      const B = [S.y, S.xy, S.ty];
+      const det3 = (m: number[][]) =>
+        m[0]![0]! * (m[1]![1]! * m[2]![2]! - m[1]![2]! * m[2]![1]!) - m[0]![1]! * (m[1]![0]! * m[2]![2]! - m[1]![2]! * m[2]![0]!) + m[0]![2]! * (m[1]![0]! * m[2]![1]! - m[1]![1]! * m[2]![0]!);
+      const d = det3(A);
+      if (Math.abs(d) > 1e-9) {
+        const col = (j: number) => A.map((row, r) => row.map((c, k) => (k === j ? B[r]! : c)));
+        const a0 = det3(col(0)) / d;
+        const b1 = det3(col(1)) / d;
+        if (a0 > 0) batterySag = Math.max(0, -b1 / a0);
+      }
+    }
+  }
+
   return {
     sampleRate: fs,
     duration: log.duration,
@@ -201,6 +292,9 @@ export function analyzeLog(log: FlightLog): LogAnalysis {
     motorHarmonics,
     hoverThrottle,
     setpointP99,
+    throttleOscillation,
+    punchErrorRatio,
+    batterySag,
     notes,
   };
 }

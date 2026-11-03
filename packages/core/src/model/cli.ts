@@ -53,6 +53,7 @@ export function buildCli(x: BuildParams, t: Tune, note?: string): string {
   set("d_min_pitch", t.pid.pitch.dMin);
   const e = t.extras;
   set("anti_gravity_gain", e.anti_gravity_gain);
+  set("vbat_sag_compensation", e.vbat_sag_compensation);
   set("iterm_relax_cutoff", e.iterm_relax_cutoff);
   set("feedforward_smooth_factor", e.feedforward_smooth_factor);
   set("feedforward_jitter_factor", e.feedforward_jitter_factor);

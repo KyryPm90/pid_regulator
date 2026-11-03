@@ -62,6 +62,7 @@ export interface ExtraSettings {
   tpa_breakpoint: number;
   thrust_linear: number;
   anti_gravity_gain: number;
+  vbat_sag_compensation: number;
   iterm_relax_cutoff: number;
   feedforward_smooth_factor: number;
   feedforward_jitter_factor: number;
