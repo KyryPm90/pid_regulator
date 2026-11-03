@@ -1,14 +1,24 @@
 import "./style.css";
-import type { Axis, BuildParams, Tune } from "./model/types";
-import { AXES } from "./model/types";
-import { BF_DEFAULTS, computeTune } from "./model/tuner";
-import { buildCli } from "./model/cli";
-import { adjustFromLog, type Adjustment } from "./model/adjust";
-import { actualRate } from "./model/rates";
-import { parseBlackboxCsv, LogParseError } from "./blackbox/csv";
-import { analyzeLog, type LogAnalysis } from "./blackbox/analyze";
+import {
+  type Axis,
+  type BuildParams,
+  type Tune,
+  AXES,
+  BF_DEFAULTS,
+  computeTune,
+  buildCli,
+  adjustFromLog,
+  type Adjustment,
+  actualRate,
+  parseBlackboxCsv,
+  LogParseError,
+  analyzeLog,
+  type LogAnalysis,
+  synthLogCsv,
+} from "@pid/core";
 import { drawChart } from "./ui/chart";
-import { synthLogCsv } from "./sim/synthLog";
+import { FlightController, FcError } from "./serial/fc";
+import { api, apiAvailable, ApiError, type SavedBuild } from "./api";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -30,6 +40,8 @@ const css = (name: string) => getComputedStyle(document.documentElement).getProp
 let analysis: LogAnalysis | null = null;
 let adjustment: Adjustment | null = null;
 let mode: "base" | "log" = "log";
+let currentCli = "";
+let currentTune: Tune | null = null;
 
 function readParams(): BuildParams {
   const num = (id: string, fallback: number) => {
@@ -118,7 +130,10 @@ function render() {
   $("modeSeg").hidden = !adjustment;
   $("modeSeg").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
   $("cliTitle").textContent = showLog ? "CLI для Betaflight: після корекції за логом" : "CLI для Betaflight: стартовий тюн";
-  $("cli").textContent = buildCli(x, tune, showLog ? `Скориговано за Blackbox-логом (${adjustment!.changes.length} змін)` : undefined);
+  currentCli = buildCli(x, tune, showLog ? `Скориговано за Blackbox-логом (${adjustment!.changes.length} змін)` : undefined);
+  currentTune = tune;
+  $("cli").textContent = currentCli;
+  $("fcDiffWrap").hidden = true;
 
   if (analysis && adjustment) renderAnalysis(analysis, adjustment, base);
 }
@@ -276,6 +291,239 @@ window.addEventListener("resize", () => {
   resizeTimer = window.setTimeout(render, 150);
 });
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+
+// ---------- Польотник по USB ----------
+let fc: FlightController | null = null;
+let writeArmed = 0;
+const fcStatus = (t: string, error = false) => {
+  $("fcStatus").textContent = t;
+  $("fcStatus").classList.toggle("error", error);
+};
+const fcButtons = (connected: boolean) => {
+  $("fcRead").hidden = !connected;
+  $("fcWrite").hidden = !connected;
+  $("fcConnect").textContent = connected ? "Відключити" : "Підключити";
+  $("fcWrite").textContent = "Записати в польотник";
+  $("fcWrite").classList.remove("danger");
+  writeArmed = 0;
+};
+const fcFail = (e: unknown) => {
+  fcStatus(e instanceof FcError ? e.message : `Помилка зв'язку: ${(e as Error).message}`, true);
+  fc = null;
+  fcButtons(false);
+};
+if (!FlightController.isSupported()) {
+  ($("fcConnect") as HTMLButtonElement).disabled = true;
+  fcStatus("Цей браузер не підтримує підключення по USB. Відкрийте застосунок у Chrome або Edge на комп'ютері, а тут скопіюйте CLI вручну.");
+}
+$("fcConnect").addEventListener("click", async () => {
+  if (fc) {
+    await fc.disconnect();
+    fc = null;
+    fcButtons(false);
+    fcStatus("Відключено.");
+    return;
+  }
+  try {
+    fcStatus("Підключаюся…");
+    fc = await FlightController.request();
+    fcButtons(true);
+    const ok = /^4\.[45]\./.test(fc.version ?? "");
+    fcStatus(`Підключено: Betaflight ${fc.version}.${ok ? "" : " Застосунок перевірено на 4.4–4.5, деякі змінні можуть відрізнятися."}`, !ok);
+  } catch (e) {
+    if ((e as Error).name === "NotFoundError") return fcStatus("Порт не вибрано.");
+    fcFail(e);
+  }
+});
+$("fcRead").addEventListener("click", async () => {
+  if (!fc) return;
+  try {
+    fcStatus("Зчитую налаштування з польотника…");
+    const diff = await fc.readCurrent(currentCli);
+    const changed = diff.filter((d) => d.current !== d.value);
+    const scope = (d: (typeof diff)[number]) => (d.scope === "global" ? "" : `${d.scope === "profile" ? "PID" : "rate"} ${d.index + 1}`);
+    $("fcDiff").innerHTML = diff
+      .map((d) => `<tr class="${d.current !== d.value ? "diff" : ""}"><td>${d.name}</td><td>${scope(d)}</td><td>${d.current ?? "немає"}</td><td>${d.value}</td></tr>`)
+      .join("");
+    $("fcDiffWrap").hidden = false;
+    const missing = diff.filter((d) => d.current === null).length;
+    fcStatus(`Відрізняється ${changed.length} з ${diff.length} параметрів.${missing ? ` ${missing} змінних немає в цій прошивці, запис їх відхилить.` : ""}`);
+  } catch (e) {
+    fcFail(e);
+  }
+});
+$("fcWrite").addEventListener("click", async () => {
+  if (!fc) return;
+  if (!writeArmed) {
+    writeArmed = window.setTimeout(() => fcButtons(!!fc), 6000);
+    $("fcWrite").textContent = "Підтвердити запис і save";
+    $("fcWrite").classList.add("danger");
+    fcStatus("Польотник перезавантажиться після save. Пропелери мають бути зняті.");
+    return;
+  }
+  clearTimeout(writeArmed);
+  try {
+    fcStatus("Записую…");
+    const res = await fc.apply(currentCli);
+    fc = null;
+    fcButtons(false);
+    if (res.saved) fcStatus("Записано і збережено. Польотник перезавантажується.");
+    else fcStatus(`Нічого не збережено: прошивка відхилила ${res.errors.length} команд. ${res.errors.slice(0, 3).join("; ")}`, true);
+  } catch (e) {
+    fcFail(e);
+  }
+});
+
+// ---------- Гараж (потрібен бекенд) ----------
+let builds: SavedBuild[] = [];
+let selectedId = "";
+let deleteArmed = 0;
+const garageStatus = (t: string, error = false) => {
+  $("garageStatus").textContent = t;
+  $("garageStatus").classList.toggle("error", error);
+};
+const fmtDate = (iso: string) => new Date(iso).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const escapeHtml = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
+function renderBuildList() {
+  $("buildSelect").innerHTML =
+    `<option value="">Новий борт</option>` + builds.map((b) => `<option value="${b.id}" ${b.id === selectedId ? "selected" : ""}>${escapeHtml(b.name)}</option>`).join("");
+  $("deleteBuild").hidden = !selectedId;
+  $("saveBuild").textContent = selectedId ? "Оновити" : "Зберегти борт";
+}
+
+async function loadHistory() {
+  const ul = $("history");
+  if (!selectedId) {
+    ul.innerHTML = `<li class="muted">Виберіть або збережіть борт, щоб бачити історію.</li>`;
+    return;
+  }
+  try {
+    const sessions = await api.listSessions(selectedId);
+    ul.innerHTML = sessions.length
+      ? sessions
+          .map((s, i) => `<li><span>${fmtDate(s.createdAt)} <span class="kind">${s.kind === "log" ? `лог, ${s.changes.length} змін` : "стартовий"}</span></span><button type="button" data-i="${i}">Копіювати CLI</button></li>`)
+          .join("")
+      : `<li class="muted">Тюнів ще немає. Натисніть «Зберегти в історію» біля CLI.</li>`;
+    ul.querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
+      b.addEventListener("click", () => {
+        const s = sessions[Number(b.dataset.i)]!;
+        navigator.clipboard?.writeText(s.cli).then(
+          () => garageStatus(`CLI від ${fmtDate(s.createdAt)} скопійовано.`),
+          () => garageStatus("Не вдалося скопіювати.", true),
+        );
+      }),
+    );
+  } catch (e) {
+    garageStatus((e as Error).message, true);
+  }
+}
+
+async function refreshBuilds() {
+  builds = await api.listBuilds();
+  if (selectedId && !builds.some((b) => b.id === selectedId)) selectedId = "";
+  renderBuildList();
+}
+
+$("buildSelect").addEventListener("change", async () => {
+  selectedId = $<HTMLSelectElement>("buildSelect").value;
+  const b = builds.find((x) => x.id === selectedId);
+  $<HTMLInputElement>("buildName").value = b?.name ?? "";
+  if (b) {
+    applyParams(b.params);
+    render();
+  }
+  renderBuildList();
+  garageStatus("");
+  await loadHistory();
+});
+$("saveBuild").addEventListener("click", async () => {
+  const name = $<HTMLInputElement>("buildName").value.trim();
+  if (!name) return garageStatus("Введіть назву борта.", true);
+  try {
+    const b = selectedId ? await api.updateBuild(selectedId, name, readParams()) : await api.createBuild(name, readParams());
+    selectedId = b.id;
+    await refreshBuilds();
+    garageStatus(`Борт «${b.name}» збережено.`);
+    await loadHistory();
+  } catch (e) {
+    garageStatus(e instanceof ApiError ? e.message : "Не вдалося зберегти.", true);
+  }
+});
+$("deleteBuild").addEventListener("click", async () => {
+  if (!selectedId) return;
+  if (!deleteArmed) {
+    deleteArmed = window.setTimeout(() => {
+      deleteArmed = 0;
+      $("deleteBuild").textContent = "Видалити";
+      $("deleteBuild").classList.remove("danger");
+    }, 5000);
+    $("deleteBuild").textContent = "Точно видалити?";
+    $("deleteBuild").classList.add("danger");
+    return;
+  }
+  clearTimeout(deleteArmed);
+  deleteArmed = 0;
+  $("deleteBuild").textContent = "Видалити";
+  $("deleteBuild").classList.remove("danger");
+  try {
+    await api.deleteBuild(selectedId);
+    selectedId = "";
+    $<HTMLInputElement>("buildName").value = "";
+    await refreshBuilds();
+    await loadHistory();
+    garageStatus("Борт видалено разом з історією.");
+  } catch (e) {
+    garageStatus((e as Error).message, true);
+  }
+});
+$("saveSession").addEventListener("click", async () => {
+  if (!selectedId) return garageStatus("Спершу збережіть борт у гаражі, потім тюн.", true);
+  if (!currentTune) return;
+  const fromLog = !!adjustment && mode === "log";
+  const summary: Record<string, number | string | null> = {};
+  if (fromLog && analysis) {
+    summary.peakRoll = analysis.axes.roll.step?.peak ?? null;
+    summary.peakPitch = analysis.axes.pitch.step?.peak ?? null;
+    summary.noise = Math.max(analysis.axes.roll.filteredHfRms, analysis.axes.pitch.filteredHfRms);
+    summary.frameResonanceHz = analysis.frameResonanceHz;
+    summary.hoverThrottle = analysis.hoverThrottle;
+    summary.durationS = Math.round(analysis.duration);
+  }
+  try {
+    await api.addSession(selectedId, {
+      kind: fromLog ? "log" : "start",
+      cli: currentCli,
+      tune: currentTune,
+      changes: fromLog ? adjustment!.changes : [],
+      findings: fromLog ? adjustment!.findings : [],
+      summary,
+    });
+    garageStatus("Тюн збережено в історію.");
+    await loadHistory();
+  } catch (e) {
+    garageStatus((e as Error).message, true);
+  }
+});
+void apiAvailable().then(async (ok) => {
+  if (!ok) return;
+  $("garage").hidden = false;
+  $("saveSession").hidden = false;
+  try {
+    await refreshBuilds();
+  } catch (e) {
+    garageStatus((e as Error).message, true);
+  }
+});
+
+// ---------- Офлайн (PWA) ----------
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      /* у вбудованому перегляді service worker недоступний */
+    });
+  });
+}
 
 try {
   const saved = localStorage.getItem(STORE_KEY);

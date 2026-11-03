@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>FPV PID Тюнер</title>
 <meta name="description" content="Стартові PID і фільтри Betaflight за параметрами FPV-борта та корекція за Blackbox-логом">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="theme-color" content="#1f5fd6">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
 </head>
@@ -19,6 +23,7 @@
   </header>
 
   <div class="grid">
+    <div class="left">
     <form class="panel" id="f" autocomplete="off">
       <h2>Паспорт борта</h2>
       <div class="presets" aria-label="Шаблони">
@@ -37,13 +42,29 @@
         <div class="field"><label for="kv">KV мотора</label><input id="kv" type="number" step="10" min="50" max="3000" value="900"></div>
         <div class="field"><label for="cells">Акумулятор, S</label><select id="cells"><option>4</option><option>5</option><option selected>6</option><option>8</option><option>10</option><option>12</option><option>14</option></select></div>
         <div class="field"><label for="auw">Злітна вага, г</label><input id="auw" type="number" step="50" min="300" max="40000" value="2600"></div>
-        <div class="field"><label for="style">Стиль польоту</label><select id="style"><option value="longrange" selected>Лонг-рейндж</option><option value="cinematic">Кіно / вантаж, плавний</option><option value="freestyle">Агресивний</option><option value="race">Швидкий, максимальний відгук</option></select></div>
+        <div class="field"><label for="style">Стиль польоту</label><select id="style"><option value="longrange" selected>Лонг-рейндж</option><option value="cinematic">Плавний / вантаж</option><option value="freestyle">Агресивний</option><option value="race">Швидкий, максимальний відгук</option></select></div>
         <div class="field"><label for="motorPoles">Полюсів мотора</label><input id="motorPoles" type="number" step="2" min="8" max="56" value="14"></div>
         <div class="field"><label for="profile">PID профіль</label><select id="profile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
         <div class="field"><label for="rateProfile">Rate профіль</label><select id="rateProfile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
         <label class="check" for="rpmFilter"><input id="rpmFilter" type="checkbox" checked><span>Bidirectional DShot + RPM-фільтр<small>Потрібна прошивка ESC з телеметрією (BLHeli_32, Bluejay, AM32)</small></span></label>
       </div>
     </form>
+
+    <section class="panel" id="garage" hidden>
+      <h2>Гараж</h2>
+      <div class="garage-row">
+        <select id="buildSelect" aria-label="Збережені борти"><option value="">Новий борт</option></select>
+        <button type="button" class="ghost" id="deleteBuild" hidden>Видалити</button>
+      </div>
+      <div class="garage-row">
+        <input id="buildName" type="text" maxlength="80" placeholder="Назва, напр. 10&quot; LR" aria-label="Назва борта">
+        <button type="button" class="copy" id="saveBuild">Зберегти борт</button>
+      </div>
+      <p class="status" id="garageStatus" role="status"></p>
+      <h3>Історія тюнів</h3>
+      <ul class="history" id="history"><li class="muted">Виберіть або збережіть борт, щоб бачити історію.</li></ul>
+    </section>
+    </div>
 
     <div class="results">
       <div class="summary" id="summary"></div>
@@ -127,8 +148,31 @@
   </section>
 
   <section class="panel">
-    <div class="cli-head"><h2 id="cliTitle">CLI для Betaflight</h2><button type="button" class="copy" id="copy">Скопіювати</button></div>
+    <div class="cli-head">
+      <h2 id="cliTitle">CLI для Betaflight</h2>
+      <div class="bb-actions">
+        <button type="button" class="ghost" id="saveSession" hidden>Зберегти в історію</button>
+        <button type="button" class="copy" id="copy">Скопіювати</button>
+      </div>
+    </div>
     <pre id="cli" tabindex="0"></pre>
+  </section>
+
+  <section class="panel" id="fcPanel">
+    <div class="cli-head">
+      <h2>Польотник по USB</h2>
+      <div class="bb-actions">
+        <button type="button" class="copy" id="fcConnect">Підключити</button>
+        <button type="button" class="ghost" id="fcRead" hidden>Порівняти з польотником</button>
+        <button type="button" class="ghost" id="fcWrite" hidden>Записати в польотник</button>
+      </div>
+    </div>
+    <p class="hint" id="fcHint">Підключіть польотник кабелем і закрийте Betaflight Configurator, щоб порт був вільний. Застосунок зайде в CLI, покаже, що зміниться, і після підтвердження запише налаштування з save. Працює в Chrome і Edge на комп'ютері.</p>
+    <p class="status" id="fcStatus" role="status"></p>
+    <div class="tbl" id="fcDiffWrap" hidden><table>
+      <thead><tr><th>Параметр</th><th>Профіль</th><th>Зараз</th><th>Буде</th></tr></thead>
+      <tbody id="fcDiff"></tbody>
+    </table></div>
   </section>
 
   <p class="foot">Модель евристична: стартові значення виводяться з дефолтів Betaflight і масштабуються за розміром пропа, потужністю (KV × банки), вагою та статором. Корекція за логом змінює параметри не більше ніж на 15% за раз, тож тюн робиться кількома ітераціями «політ → лог → корекція». Перед першим зльотом перевірте напрямок моторів без пропелерів, першим злетом зробіть 30 секунд висіння на малій висоті й перевірте нагрів моторів. Якщо мотори гарячі, зменшіть D на 15–20%.</p>

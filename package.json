@@ -1,19 +1,20 @@
 {
-  "name": "fpv-pid-tuner",
-  "version": "0.1.0",
+  "name": "pid-regulator",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Підбір стартових PID і фільтрів Betaflight за параметрами FPV-борта та корекція за Blackbox-логом",
+  "description": "FPV PID Тюнер: підбір PID, фільтрів і рейтів Betaflight для великих бортів, аналіз Blackbox, бекенд і підключення до польотника",
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "dev": "npm run dev -w @pid/web",
+    "dev:api": "npm run dev -w @pid/api",
+    "build": "npm run typecheck && npm run build -w @pid/web",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "22.10.2",
     "typescript": "5.8.3",
-    "vite": "6.3.5",
     "vitest": "3.2.4"
   }
 }

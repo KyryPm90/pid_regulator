@@ -1,0 +1,30 @@
+# Локальний запуск бекенду: docker compose up
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pid
+      POSTGRES_PASSWORD: pid
+      POSTGRES_DB: pid
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pid"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://pid:pid@db:5432/pid
+      CORS_ORIGIN: http://localhost:5173
+    ports:
+      - "8787:8787"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

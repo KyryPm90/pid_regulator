@@ -113,5 +113,16 @@ details[open] summary { margin-bottom: 12px; }
 .cli-head h2 { margin: 0; }
 .copy { font: inherit; font-size: 13px; font-weight: 600; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
 pre { margin: 0; background: var(--code-bg); color: var(--code-ink); font-family: var(--f-mono); font-size: 12.5px; line-height: 1.55; padding: 14px 16px; border-radius: 8px; overflow-x: auto; max-height: 440px; }
+.left { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.garage-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.garage-row select, .garage-row input { flex: 1 1 auto; min-width: 0; }
+.garage-row button { flex: 0 0 auto; }
+.history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.history li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.history li.muted, .muted { color: var(--muted); }
+.history .kind { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+.history button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: transparent; color: var(--ink); padding: 3px 8px; border-radius: 6px; cursor: pointer; }
+tr.diff td { color: var(--accent); font-weight: 600; }
+.ghost.danger { border-color: var(--amber); color: var(--amber); }
 .foot { color: var(--muted); font-size: 13px; margin: 0; max-width: 90ch; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
