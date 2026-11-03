@@ -117,3 +117,11 @@ describe("adjustFromLog (синтетичний 10\")", () => {
     expect(changes.filter((c) => c.group === "PID" && /^(p|d)_/.test(c.param))).toEqual([]);
   });
 });
+
+describe("діапазон пропа", () => {
+  it("попереджає, коли проп поза підтримуваним діапазоном", () => {
+    const base = { prop: 30, pitch: 5, blades: 3, frame: "open", stator: "3115", kv: 900, cells: 6, auw: 2600, style: "longrange", motorPoles: 14, profile: 0, rateProfile: 0, rpmFilter: true } as const;
+    expect(computeTune(base).warnings.some((w) => w.includes("поза підтримуваним"))).toBe(true);
+    expect(computeTune({ ...base, prop: 10 }).warnings.some((w) => w.includes("поза підтримуваним"))).toBe(false);
+  });
+});
