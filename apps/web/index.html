@@ -121,6 +121,18 @@
 
     <div id="bbResult" hidden>
       <div class="summary" id="bbSummary"></div>
+      <section class="sub-panel" id="cmpBox" hidden>
+        <div class="head-row">
+          <h3 id="cmpTitle">Порівняння з попереднім логом</h3>
+          <button type="button" class="ghost" id="cmpReset">Прибрати порівняння</button>
+        </div>
+        <p class="cmp-summary" id="cmpSummary"></p>
+        <div class="tbl"><table class="changes">
+          <thead><tr><th>Показник</th><th>До</th><th>Після</th><th>Результат</th></tr></thead>
+          <tbody id="cmpBody"></tbody>
+        </table></div>
+        <p class="hint">Менше значення краще. Пунктир на графіку відгуку показує попередній лог.</p>
+      </section>
       <div class="two">
         <section class="sub-panel">
           <h3>Відгук на крок</h3>

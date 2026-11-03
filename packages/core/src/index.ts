@@ -9,6 +9,7 @@ export * from "./blackbox/fft";
 export * from "./blackbox/spectrum";
 export * from "./blackbox/step";
 export * from "./blackbox/analyze";
+export * from "./blackbox/compare";
 export * from "./sim/synthLog";
 export * from "./sim/synthBbl";
 export * from "./model/cliParse";
