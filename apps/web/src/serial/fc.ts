@@ -26,6 +26,7 @@ export class FlightController {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private buffer = "";
+  private pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
   private decoder = new TextDecoder();
   private encoder = new TextEncoder();
   version: string | null = null;
@@ -37,9 +38,30 @@ export class FlightController {
     const serial = (navigator as Navigator & { serial?: { requestPort(): Promise<PortLike> } }).serial;
     if (!serial) throw new FcError("Цей браузер не підтримує Web Serial. Відкрийте застосунок у Chrome або Edge на комп'ютері.");
     const port = await serial.requestPort();
+    return FlightController.connect(port);
+  }
+
+  /**
+   * Відкриває порт і входить у CLI. Якщо щось пішло не так, порт закривається,
+   * щоб наступна спроба не впала з «port is already open».
+   */
+  static async connect(port: PortLike, timeoutMs?: number): Promise<FlightController> {
+    if (port.readable || port.writable) {
+      // Порт лишився відкритим після попередньої спроби: закриваємо і відкриваємо наново.
+      try {
+        await port.close?.();
+      } catch {
+        throw new FcError("Порт зайнятий попереднім підключенням. Оновіть сторінку (F5) і підключіться ще раз.");
+      }
+    }
     await port.open?.({ baudRate: 115200 });
-    const fc = new FlightController(port);
-    await fc.enterCli();
+    const fc = new FlightController(port, timeoutMs);
+    try {
+      await fc.enterCli();
+    } catch (e) {
+      await fc.release();
+      throw e;
+    }
     return fc;
   }
 
@@ -51,8 +73,17 @@ export class FlightController {
     if (!this.port.readable || !this.port.writable) throw new FcError("Порт не відкрито.");
     this.reader = this.port.readable.getReader();
     this.writer = this.port.writable.getWriter();
-    await this.write("#");
-    await this.readUntilPrompt();
+    // Одразу після відкриття порту польотник іноді губить перші байти, тому пробуємо кілька разів.
+    const tries = 3;
+    for (let i = 1; ; i++) {
+      await this.write(i === 1 ? "#" : "\r\n#");
+      try {
+        await this.readUntilPrompt(Math.ceil(this.timeoutMs / tries));
+        break;
+      } catch (e) {
+        if (i >= tries) throw e;
+      }
+    }
     const v = await this.command("version");
     this.version = parseBetaflightVersion(v);
     if (!this.version) throw new FcError("Польотник відповів, але це не схоже на Betaflight.");
@@ -110,7 +141,8 @@ export class FlightController {
     await this.release();
   }
 
-  private async release() {
+  /** Звільняє потоки і закриває порт. */
+  async release() {
     try {
       await this.reader?.cancel();
     } catch {
@@ -120,6 +152,7 @@ export class FlightController {
     this.writer?.releaseLock();
     this.reader = null;
     this.writer = null;
+    this.pending = null;
     try {
       await this.port.close?.();
     } catch {
@@ -132,17 +165,22 @@ export class FlightController {
     await this.writer.write(this.encoder.encode(text));
   }
 
-  private async readUntilPrompt(): Promise<string> {
+  private async readUntilPrompt(timeoutMs = this.timeoutMs): Promise<string> {
     if (!this.reader) throw new FcError("Польотник не підключено.");
-    const deadline = Date.now() + this.timeoutMs;
+    const deadline = Date.now() + timeoutMs;
     while (!PROMPT.test(this.buffer)) {
       const left = deadline - Date.now();
       if (left <= 0) throw new FcError("Польотник не відповідає. Перевірте кабель і що порт не зайнятий Betaflight Configurator.");
+      // Незавершене читання після таймауту не губимо: його дочекається наступний виклик.
+      this.pending ??= this.reader.read();
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const chunk = await Promise.race([
-        this.reader.read(),
-        new Promise<null>((r) => setTimeout(() => r(null), left)),
+        this.pending,
+        new Promise<null>((r) => (timer = setTimeout(() => r(null), left))),
       ]);
+      clearTimeout(timer);
       if (chunk === null) continue;
+      this.pending = null;
       if (chunk.done) throw new FcError("З'єднання з польотником розірвано.");
       this.buffer += this.decoder.decode(chunk.value, { stream: true });
     }

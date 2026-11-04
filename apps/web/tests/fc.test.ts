@@ -91,3 +91,60 @@ describe("FlightController", () => {
     expect(f.log.at(-1)).toBe("exit");
   });
 });
+
+describe("FlightController.connect", () => {
+  /** Порт, що імітує Web Serial: readable/writable з'являються після open() і зникають після close(). */
+  function serialPort(opts: { dropFirst?: number; silent?: boolean } = {}) {
+    const enc = new TextEncoder();
+    let dropped = 0;
+    const state = { opened: 0, closed: 0 };
+    const port: PortLike = {
+      readable: null,
+      writable: null,
+      async open() {
+        if (port.readable) throw new Error("Failed to execute 'open' on 'SerialPort': The port is already open.");
+        state.opened++;
+        let ctrl!: ReadableStreamDefaultController<Uint8Array>;
+        port.readable = new ReadableStream<Uint8Array>({ start: (c) => void (ctrl = c) });
+        port.writable = new WritableStream<Uint8Array>({
+          write(chunk) {
+            const s = new TextDecoder().decode(chunk);
+            if (opts.silent) return;
+            if (s.endsWith("#") && dropped++ >= (opts.dropFirst ?? 0)) ctrl.enqueue(enc.encode("\r\nEntering CLI Mode\r\n\r\n# "));
+            else if (s === "version\n") ctrl.enqueue(enc.encode("version\r\n# Betaflight / STM32F405 (S405) 4.5.1 Jul 26 2024\r\n# "));
+          },
+        });
+      },
+      async close() {
+        state.closed++;
+        port.readable = null;
+        port.writable = null;
+      },
+    };
+    return { port, state };
+  }
+
+  it("закриває порт, якщо польотник не відповів, і дозволяє спробувати ще раз", async () => {
+    const { port, state } = serialPort({ silent: true });
+    await expect(FlightController.connect(port, 150)).rejects.toThrow("не відповідає");
+    expect(state.closed).toBe(1);
+    expect(port.readable).toBeNull();
+    await expect(FlightController.connect(port, 150)).rejects.toThrow("не відповідає");
+    expect(state.opened).toBe(2);
+  });
+
+  it("перевідкриває порт, що лишився відкритим", async () => {
+    const { port, state } = serialPort();
+    await port.open!({ baudRate: 115200 });
+    const fc = await FlightController.connect(port, 300);
+    expect(fc.version).toBe("4.5.1");
+    expect(state.closed).toBe(1);
+    expect(state.opened).toBe(2);
+  });
+
+  it("повторює вхід у CLI, якщо польотник проігнорував перший #", async () => {
+    const { port } = serialPort({ dropFirst: 1 });
+    const fc = await FlightController.connect(port, 600);
+    expect(fc.version).toBe("4.5.1");
+  });
+});
