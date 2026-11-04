@@ -23,6 +23,9 @@ import {
   type LogAnalysis,
   synthBbl,
   type FlightLog,
+  STYLES,
+  STYLE_ORDER,
+  styleEffects,
 } from "@pid/core";
 import { drawChart } from "./ui/chart";
 import { FlightController, FcError } from "./serial/fc";
@@ -35,10 +38,30 @@ const PRESETS: Record<string, Partial<BuildParams>> = {
   p10: { prop: 10, pitch: 5, blades: 3, frame: "open", stator: "3115", kv: 900, cells: 6, auw: 2600, style: "longrange", motorPoles: 14, rpmFilter: true },
   p13: { prop: 13, pitch: 6.5, blades: 2, frame: "open", stator: "4214", kv: 480, cells: 12, auw: 5000, style: "cinematic", motorPoles: 24, rpmFilter: true },
   p15: { prop: 15, pitch: 7, blades: 2, frame: "open", stator: "4215", kv: 400, cells: 12, auw: 7000, style: "cinematic", motorPoles: 24, rpmFilter: true },
-  p21: { prop: 21, pitch: 7, blades: 2, frame: "open", stator: "6215", kv: 170, cells: 12, auw: 16000, style: "cinematic", motorPoles: 28, rpmFilter: true },
+  p21: { prop: 21, pitch: 7, blades: 2, frame: "open", stator: "6215", kv: 170, cells: 12, auw: 16000, style: "payload", motorPoles: 28, rpmFilter: true },
 };
 
 const STORE_KEY = "fpv-pid-tuner:build-large";
+
+// Картки вибору стилю польоту
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+$("styleCards").innerHTML = STYLE_ORDER.map(
+  (k) =>
+    `<label class="style-card"><input type="radio" name="style" value="${k}"${k === "longrange" ? " checked" : ""}>` +
+    `<b>${cap(STYLES[k].name)}</b><span>${STYLES[k].desc}</span></label>`,
+).join("");
+
+function renderStyleEffect(x: BuildParams) {
+  const rows = styleEffects(x);
+  const fmt = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
+  $("styleEffect").innerHTML = rows.length
+    ? `<p>Що змінює стиль «${STYLES[x.style].name}» порівняно з базовим «${STYLES.freestyle.name}»:</p><ul>${rows
+        .map((r) => {
+          return `<li><span>${r.label}</span><span><s>${fmt(r.base)}</s> → <b>${fmt(r.value)}${r.unit ? ` ${r.unit}` : ""}</b></span></li>`;
+        })
+        .join("")}</ul>`
+    : `<p>Базовий стиль: значення без поправок на стиль.</p>`;
+}
 /** Синтетичний 10": повільніший контур, шум моторів 40–210 Гц, резонанс рами 95 Гц. */
 const DEMO_10_INCH = { seconds: 30, wn: 55, delayMs: 6, frameHz: 95, motorHzIdle: 40, motorHzSpan: 170, gyroLpfHz: 70, zeta: [0.4, 0.48, 0.8] as [number, number, number] };
 const AXIS_NAME: Record<Axis, string> = { roll: "Roll", pitch: "Pitch", yaw: "Yaw" };
@@ -71,7 +94,7 @@ function readParams(): BuildParams {
     kv: num("kv", 1950),
     cells: num("cells", 6),
     auw: num("auw", 600),
-    style: $<HTMLSelectElement>("style").value as BuildParams["style"],
+    style: (($("f").querySelector<HTMLInputElement>('input[name="style"]:checked')?.value) ?? "longrange") as BuildParams["style"],
     motorPoles: num("motorPoles", 14),
     profile: Number($<HTMLSelectElement>("profile").value) || 0,
     rateProfile: Number($<HTMLSelectElement>("rateProfile").value) || 0,
@@ -80,6 +103,10 @@ function readParams(): BuildParams {
 }
 
 function applyParams(p: Partial<BuildParams>) {
+  if (p.style) {
+    const r = $("f").querySelector<HTMLInputElement>(`input[name="style"][value="${p.style}"]`);
+    if (r) r.checked = true;
+  }
   for (const [k, v] of Object.entries(p)) {
     const el = document.getElementById(k) as HTMLInputElement | null;
     if (!el) continue;
@@ -107,6 +134,7 @@ function render() {
     /* сховище недоступне: нічого страшного */
   }
   const base = computeTune(x);
+  renderStyleEffect(x);
   // Корекцію за логом рахуємо від того, що реально стоїть на борту, якщо це відомо.
   const real = actual ? applyCliValues(base, actual.values) : null;
   const start: Tune = real && real.applied.length >= 3 ? real.tune : base;

@@ -14,3 +14,4 @@ export * from "./sim/synthLog";
 export * from "./sim/synthBbl";
 export * from "./model/cliParse";
 export * from "./model/settings";
+export * from "./model/styleEffects";

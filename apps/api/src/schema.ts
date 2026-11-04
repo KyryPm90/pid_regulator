@@ -11,7 +11,7 @@ export const buildParamsSchema = z.object({
   kv: z.number().min(30).max(5000),
   cells: z.number().int().min(1).max(16),
   auw: z.number().min(100).max(60000),
-  style: z.enum(["freestyle", "race", "cinematic", "longrange"]),
+  style: z.enum(["freestyle", "race", "cinematic", "longrange", "payload"]),
   motorPoles: z.number().int().min(4).max(64),
   profile: z.number().int().min(0).max(3),
   rateProfile: z.number().int().min(0).max(3),

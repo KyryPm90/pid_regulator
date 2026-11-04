@@ -1,7 +1,7 @@
 export type Axis = "roll" | "pitch" | "yaw";
 export const AXES: readonly Axis[] = ["roll", "pitch", "yaw"] as const;
 
-export type FlyingStyle = "freestyle" | "race" | "cinematic" | "longrange";
+export type FlyingStyle = "freestyle" | "race" | "cinematic" | "longrange" | "payload";
 export type FrameType = "open" | "ducted";
 
 /** Параметри борта, які вводить користувач. */
