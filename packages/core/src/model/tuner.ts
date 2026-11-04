@@ -11,6 +11,8 @@ export const BF_DEFAULTS: Record<Axis, AxisPid> = {
 
 interface StyleProfile {
   name: string;
+  /** Коротко, як поводиться борт у цьому стилі */
+  desc: string;
   p: number;
   i: number;
   ff: number;
@@ -22,11 +24,30 @@ interface StyleProfile {
 }
 
 export const STYLES: Record<FlyingStyle, StyleProfile> = {
-  freestyle: { name: "агресивний", p: 1, i: 1, ff: 1, relax: 15, smooth: 25, jitter: 7, boost: 15, antiGravity: 80 },
-  race: { name: "швидкий", p: 1.05, i: 1.05, ff: 1.3, relax: 30, smooth: 15, jitter: 5, boost: 20, antiGravity: 100 },
-  cinematic: { name: "плавний", p: 0.95, i: 1.05, ff: 0.55, relax: 10, smooth: 50, jitter: 12, boost: 5, antiGravity: 90 },
-  longrange: { name: "лонг-рейндж", p: 0.95, i: 1.1, ff: 0.75, relax: 10, smooth: 40, jitter: 10, boost: 10, antiGravity: 100 },
+  longrange: {
+    name: "лонг-рейндж", desc: "Спокійний і стабільний, тримає курс на довгих перельотах.",
+    p: 0.95, i: 1.1, ff: 0.75, relax: 10, smooth: 40, jitter: 10, boost: 10, antiGravity: 100,
+  },
+  cinematic: {
+    name: "плавний", desc: "М'які старти й зупинки обертання для зйомки, без ривків від стіків.",
+    p: 0.95, i: 1.05, ff: 0.55, relax: 10, smooth: 50, jitter: 12, boost: 5, antiGravity: 90,
+  },
+  payload: {
+    name: "вантаж", desc: "Важкий або змінний вантаж: міцніше тримає положення, газ плавний біля висіння.",
+    p: 0.95, i: 1.15, ff: 0.5, relax: 10, smooth: 45, jitter: 12, boost: 5, antiGravity: 120,
+  },
+  freestyle: {
+    name: "агресивний", desc: "Базові значення: різкий відгук для фрістайлу.",
+    p: 1, i: 1, ff: 1, relax: 15, smooth: 25, jitter: 7, boost: 15, antiGravity: 80,
+  },
+  race: {
+    name: "швидкий", desc: "Максимальний відгук і високі рейти для швидких прольотів.",
+    p: 1.05, i: 1.05, ff: 1.3, relax: 30, smooth: 15, jitter: 5, boost: 20, antiGravity: 100,
+  },
 };
+
+/** Порядок стилів в інтерфейсі: від найспокійнішого до найшвидшого. */
+export const STYLE_ORDER: FlyingStyle[] = ["cinematic", "payload", "longrange", "freestyle", "race"];
 
 export const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 export const round5 = (v: number): number => Math.round(v / 5) * 5;

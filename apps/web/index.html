@@ -42,12 +42,16 @@
         <div class="field"><label for="kv">KV мотора</label><input id="kv" type="number" step="10" min="50" max="3000" value="900"></div>
         <div class="field"><label for="cells">Акумулятор, S</label><select id="cells"><option>4</option><option>5</option><option selected>6</option><option>8</option><option>10</option><option>12</option><option>14</option></select></div>
         <div class="field"><label for="auw">Злітна вага, г</label><input id="auw" type="number" step="50" min="300" max="40000" value="2600"></div>
-        <div class="field"><label for="style">Стиль польоту</label><select id="style"><option value="longrange" selected>Лонг-рейндж</option><option value="cinematic">Плавний / вантаж</option><option value="freestyle">Агресивний</option><option value="race">Швидкий, максимальний відгук</option></select></div>
         <div class="field"><label for="motorPoles">Полюсів мотора</label><input id="motorPoles" type="number" step="2" min="8" max="56" value="14"></div>
         <div class="field"><label for="profile">PID профіль</label><select id="profile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
         <div class="field"><label for="rateProfile">Rate профіль</label><select id="rateProfile"><option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option></select></div>
         <label class="check" for="rpmFilter"><input id="rpmFilter" type="checkbox" checked><span>Bidirectional DShot + RPM-фільтр<small>Потрібна прошивка ESC з телеметрією (BLHeli_32, Bluejay, AM32)</small></span></label>
       </div>
+      <fieldset class="styles">
+        <legend>Стиль польоту</legend>
+        <div class="style-cards" id="styleCards"></div>
+        <div class="style-effect" id="styleEffect" aria-live="polite"></div>
+      </fieldset>
     </form>
 
     <section class="panel" id="garage" hidden>

@@ -9,6 +9,7 @@ const STYLE_RATES: Record<FlyingStyle, { max: number; centerFrac: number; expo: 
   freestyle: { max: 1.1, centerFrac: 0.25, expo: 0.35, thrExpo: 0.2 },
   longrange: { max: 0.9, centerFrac: 0.22, expo: 0.45, thrExpo: 0.25 },
   cinematic: { max: 0.7, centerFrac: 0.2, expo: 0.55, thrExpo: 0.35 },
+  payload: { max: 0.65, centerFrac: 0.2, expo: 0.5, thrExpo: 0.4 },
 };
 
 const round10 = (v: number) => Math.round(v / 10) * 10;
